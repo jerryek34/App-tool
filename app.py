@@ -67,12 +67,12 @@ SEED_TAXONOMY = {
             {"name": "Domain 7: Publication Bias Assessment", "question": "Did authors formally test for publication bias (funnel plots, Egger's test)?"},
             {"name": "Domain 8: Conflict of Interest & Funding", "question": "Did authors report their own funding/COIs and funding of primary included studies?"},
         ],
-        "scale": "High Confidence | Moderate Confidence | Low Confidence | Critically Low Confidence. Based on weaknesses in 7 critical domains.",
+        "scale": "High Confidence | Moderate Confidence | Low Confidence | Critically Low Confidence.",
         "scoring_guide": (
-            "• High Confidence: No or one non-critical weakness; provides an accurate, comprehensive synthesis of available studies.\n"
-            "• Moderate Confidence: More than one non-critical weakness, but no critical flaws; summary remains accurate.\n"
-            "• Low Confidence: One critical flaw (with or without non-critical weaknesses); the review may not provide an accurate summary.\n"
-            "• Critically Low Confidence: More than one critical flaw; the review should not be relied on for clinical decision-making."
+            "• High Confidence: No or one non-critical weakness.\n"
+            "• Moderate Confidence: More than one non-critical weakness, no critical flaws.\n"
+            "• Low Confidence: One critical flaw.\n"
+            "• Critically Low Confidence: More than one critical flaw."
         )
     },
     "Narrative Review": {
@@ -89,11 +89,8 @@ SEED_TAXONOMY = {
         ],
         "scale": "0 = Not Met | 1 = Partially Met | 2 = Met. Total score out of 12 (>=9 required for high quality).",
         "scoring_guide": (
-            "• 6 domains scored 0 (absent/not met), 1 (partially met), or 2 (completely met).\n"
-            "• Maximum total score: 12 points.\n"
-            "• High Quality: 9 to 12 points (robust reasoning, well-referenced, and balanced).\n"
-            "• Moderate Quality: 6 to 8 points (some omissions in search methods or balance).\n"
-            "• Low Quality: 0 to 5 points (insufficient literature reporting or high risk of advocacy bias)."
+            "• 6 domains scored 0, 1, or 2 (Max: 12 points).\n"
+            "• High Quality: 9-12 points | Moderate: 6-8 points | Low Quality: 0-5 points."
         )
     },
     "Clinical Practice Guideline / Consensus Statement": {
@@ -108,12 +105,10 @@ SEED_TAXONOMY = {
             {"name": "Domain 5: Applicability", "question": "Does it describe facilitators/barriers, execution tools, and monitoring criteria?"},
             {"name": "Domain 6: Editorial Independence", "question": "Did funding bodies influence content, and were competing interests addressed?"},
         ],
-        "scale": "1 (Strongly Disagree / Absent) to 7 (Strongly Agree / Exemplary). Standardized % >= 70% required for high quality.",
+        "scale": "1 (Strongly Disagree) to 7 (Strongly Agree). Standardized % >= 70% required for high quality.",
         "scoring_guide": (
-            "• Scored 1 to 7 per item. Scaled domain scores calculated as: (Obtained - Minimum possible) / (Maximum possible - Minimum possible) × 100%.\n"
-            "• Strongly Recommended: Domain 3 (Rigour) >= 70% and most other domains >= 70%.\n"
-            "• Recommended with Modifications: Most domains score between 50% and 69%.\n"
-            "• Not Recommended: Domain 3 < 50%, reflecting substandard development methods."
+            "• Scaled domain % = (Obtained - Min) / (Max - Min) × 100%.\n"
+            "• Recommended: Domain 3 (Rigour) >= 70%."
         )
     },
     "Randomized Controlled Trial (RCT)": {
@@ -129,9 +124,9 @@ SEED_TAXONOMY = {
         ],
         "scale": "Low Risk | Some Concerns | High Risk. A single High Risk domain mandates an overall High Risk rating.",
         "scoring_guide": (
-            "• Low Risk of Bias: Study is judged to be at low risk across all 5 key domains.\n"
-            "• Some Concerns: Study has some concerns in at least one domain, but no domain is at high risk.\n"
-            "• High Risk of Bias: High risk of bias in at least one domain, or 'some concerns' across multiple domains that substantially lower confidence."
+            "• Low Risk: Low risk in all domains.\n"
+            "• Some Concerns: Some concerns in >=1 domain, no high risk.\n"
+            "• High Risk: High risk in >=1 domain."
         )
     },
     "Non-Randomized Intervention / Quasi-Experimental": {
@@ -149,10 +144,10 @@ SEED_TAXONOMY = {
         ],
         "scale": "Low Risk | Moderate Risk | Serious Risk | Critical Risk | No Information.",
         "scoring_guide": (
-            "• Low Risk: Comparable to a well-performed randomized trial.\n"
-            "• Moderate Risk: Sound for a non-randomized study; some residual confounding possible.\n"
-            "• Serious Risk: Presence of important confounding or measurement flaws; interpret cautiously.\n"
-            "• Critical Risk: Flaws are so severe that the study provides no useful evidence."
+            "• Low Risk: Comparable to a well-conducted RCT.\n"
+            "• Moderate: Sound for non-randomized study.\n"
+            "• Serious: Important confounding/deviations.\n"
+            "• Critical: Flaws render study uninformative."
         )
     },
     "Observational Study (Cohort)": {
@@ -166,10 +161,8 @@ SEED_TAXONOMY = {
         ],
         "scale": "Stars Awarded (0-9 Total): Good Quality (7-9 Stars) | Fair Quality (4-6 Stars) | Poor Quality (0-3 Stars).",
         "scoring_guide": (
-            "• Selection (Max 4 ★): Evaluates exposed representativeness, non-exposed selection, exposure verification, and absence of outcome at baseline.\n"
-            "• Comparability (Max 2 ★): 1 ★ for controlling primary confounder (e.g., age/sex), 1 ★ for controlling secondary critical confounders.\n"
-            "• Outcome (Max 3 ★): 1 ★ for blinded/record outcome assessment, 1 ★ for sufficient duration, 1 ★ for follow-up rate > 80%.\n"
-            "• Thresholds: 7-9 Stars = Good Quality; 4-6 Stars = Fair Quality; 0-3 Stars = Poor Quality."
+            "• Selection (Max 4 ★) + Comparability (Max 2 ★) + Outcome (Max 3 ★).\n"
+            "• Good: 7-9 Stars | Fair: 4-6 Stars | Poor: 0-3 Stars."
         )
     },
     "Observational Study (Case-Control)": {
@@ -183,10 +176,8 @@ SEED_TAXONOMY = {
         ],
         "scale": "Stars Awarded (0-9 Total): Good Quality (7-9 Stars) | Fair Quality (4-6 Stars) | Poor Quality (0-3 Stars).",
         "scoring_guide": (
-            "• Selection (Max 4 ★): Case validation, representativeness, control selection, and definition of controls without prior outcome.\n"
-            "• Comparability (Max 2 ★): Matching or statistical adjustment for primary and additional covariates.\n"
-            "• Exposure (Max 3 ★): Secure ascertainment, same interview method, and identical non-response rates.\n"
-            "• Thresholds: 7-9 Stars = Good Quality; 4-6 Stars = Fair Quality; 0-3 Stars = Poor Quality."
+            "• Selection (Max 4 ★) + Comparability (Max 2 ★) + Exposure (Max 3 ★).\n"
+            "• Good: 7-9 Stars | Fair: 4-6 Stars | Poor: 0-3 Stars."
         )
     },
     "Cross-Sectional Study": {
@@ -203,9 +194,7 @@ SEED_TAXONOMY = {
         "scale": "Yes | No | Don't Know across 20 structured criteria. High Quality (>=15 Yes) | Moderate Quality (10-14 Yes) | Low Quality (<10 Yes).",
         "scoring_guide": (
             "• Evaluates 20 specific cross-sectional quality questions.\n"
-            "• High Quality (>=15 Yes): Low risk of selection and reporting bias.\n"
-            "• Moderate Quality (10-14 Yes): Acceptable reporting, but non-response or confounding concerns exist.\n"
-            "• Low Quality (<10 Yes): High vulnerability to sampling bias or unverified survey instruments."
+            "• High (>=15 Yes) | Moderate (10-14 Yes) | Low (<10 Yes)."
         )
     },
     "Prediction Model Study": {
@@ -220,8 +209,8 @@ SEED_TAXONOMY = {
         ],
         "scale": "Low Risk | High Risk | Unclear Risk. If at least one domain is High Risk, overall model risk of bias is High Risk.",
         "scoring_guide": (
-            "• Low Risk of Bias: All 4 domains (Participants, Predictors, Outcome, Analysis) judged low risk.\n"
-            "• High Risk of Bias: At least one domain evaluated as high risk, indicating substantial risk of optimistic model performance or overfitting."
+            "• Low Risk: All 4 domains judged low risk.\n"
+            "• High Risk: >=1 domain evaluated as high risk."
         )
     },
     "Diagnostic Accuracy Study": {
@@ -236,9 +225,8 @@ SEED_TAXONOMY = {
         ],
         "scale": "Low Risk | High Risk | Unclear Risk.",
         "scoring_guide": (
-            "• Low Risk of Bias: All 4 domains are judged low risk; high diagnostic validity.\n"
-            "• High Risk of Bias: One or more domains show unblinded interpretation, verification bias, or spectrum bias.\n"
-            "• Unclear Risk: Insufficient reporting to verify test sequence or blinding."
+            "• Low Risk: All 4 domains judged low risk.\n"
+            "• High Risk: >=1 domain shows unblinded interpretation, verification, or spectrum bias."
         )
     },
     "Qualitative Study": {
@@ -256,8 +244,7 @@ SEED_TAXONOMY = {
         "scale": "Yes | Can't Tell | No.",
         "scoring_guide": (
             "• Assesses 10 key qualitative validity items (Yes, Can't Tell, No).\n"
-            "• High Quality: Research reflexivity, thematic saturation, and participant quotes are fully articulated.\n"
-            "• Moderate/Low Quality: Failure to address researcher bias or unclear qualitative analysis methodology."
+            "• High Quality: Reflexivity, saturation, and quotes fully verified."
         )
     },
 }
@@ -453,7 +440,7 @@ def format_harvard_authors(raw_authors: str, max_authors: int = 3) -> str:
         return f"{', '.join(parsed_authors[:-1])} and {parsed_authors[-1]}"
 
 
-def format_harvard_filename(data: dict, extension: str) -> str:
+def format_harvard_filename(data: dict, extension: str, tag: str = "KAT") -> str:
     raw_authors = str(data.get("authors", "")).strip()
     year = str(data.get("year_published", "")).strip()
     tool = str(data.get("appraisal_tool_selected", "Tool")).strip()
@@ -473,73 +460,23 @@ def format_harvard_filename(data: dict, extension: str) -> str:
 
     clean_tool = re.sub(r"[^a-zA-Z0-9_-]", "_", tool)
     clean_author = re.sub(r"[^a-zA-Z0-9_-]", "_", author_part)
-    clean_filename = f"{clean_author}_{clean_year}_{clean_tool}_KAT.{extension.lstrip('.')}"
+    clean_filename = f"{clean_author}_{clean_year}_{clean_tool}_{tag}.{extension.lstrip('.')}"
     return re.sub(r"_+", "_", clean_filename)
 
 
 def extract_declared_design_ranked(text: str) -> Optional[Tuple[str, str, int]]:
     head = text[:6000].lower()
-
     ranked_definitions = [
-        ("Systematic Review / Meta-Analysis", [
-            r"\bsystematic\s+review\s+and\s+meta-analysis\b",
-            r"\bmeta-analysis\s+and\s+systematic\s+review\b",
-            r"\bnetwork\s+meta-analysis\b",
-            r"\bsystematic\s+review\b",
-            r"\bmeta-analysis\b",
-        ], 100),
-        ("Clinical Practice Guideline / Consensus Statement", [
-            r"\bclinical\s+practice\s+guideline\b",
-            r"\bconsensus\s+statement\b",
-            r"\bdelphi\s+consensus\b",
-            r"\bexpert\s+consensus\b",
-        ], 95),
-        ("Randomized Controlled Trial (RCT)", [
-            r"\brandomi[zs]ed\s+controlled\s+trial\b",
-            r"\brandomi[zs]ed\s+clinical\s+trial\b",
-            r"\bdouble-blind(?:ed)?,\s+placebo-controlled\b",
-        ], 90),
-        ("Prediction Model Study", [
-            r"\bclinical\s+prediction\s+model\b",
-            r"\bprognostic\s+model\s+study\b",
-            r"\brisk\s+prediction\s+model\b",
-            r"\bprediction\s+rule\s+validation\b",
-        ], 85),
-        ("Diagnostic Accuracy Study", [
-            r"\bdiagnostic\s+accuracy\s+study\b",
-            r"\bdiagnostic\s+test\s+accuracy\b",
-        ], 82),
-        ("Observational Study (Cohort)", [
-            r"\bretrospective\s+cohort\s+study\b",
-            r"\bprospective\s+cohort\s+study\b",
-            r"\bretrospective\s+comparative\s+study\b",
-            r"\bcomparative\s+cohort\s+study\b",
-            r"\bretrospective\s+cohort\b",
-            r"\bprospective\s+cohort\b",
-            r"\bcohort\s+study\b",
-        ], 80),
-        ("Observational Study (Case-Control)", [
-            r"\bcase-control\s+study\b",
-            r"\bcase\s+control\s+study\b",
-            r"\bmatched\s+case-control\b",
-        ], 78),
-        ("Cross-Sectional Study", [
-            r"\bcross-sectional\s+study\b",
-            r"\bcross\s+sectional\s+study\b",
-            r"\bcross-sectional\s+survey\b",
-            r"\bprevalence\s+study\b",
-        ], 75),
-        ("Qualitative Study", [
-            r"\bqualitative\s+study\b",
-            r"\bthematic\s+analysis\s+study\b",
-            r"\bphenomenological\s+study\b",
-        ], 70),
-        ("Narrative Review", [
-            r"\bnarrative\s+review\b",
-            r"\bscoping\s+review\b",
-            r"\bliterature\s+review\b",
-            r"\bstate-of-the-art\s+review\b",
-        ], 65),
+        ("Systematic Review / Meta-Analysis", [r"\bsystematic\s+review\s+and\s+meta-analysis\b", r"\bmeta-analysis\b", r"\bsystematic\s+review\b"], 100),
+        ("Clinical Practice Guideline / Consensus Statement", [r"\bclinical\s+practice\s+guideline\b", r"\bconsensus\s+statement\b"], 95),
+        ("Randomized Controlled Trial (RCT)", [r"\brandomi[zs]ed\s+controlled\s+trial\b", r"\bdouble-blind(?:ed)?,\s+placebo-controlled\b"], 90),
+        ("Prediction Model Study", [r"\bclinical\s+prediction\s+model\b", r"\bprognostic\s+model\s+study\b"], 85),
+        ("Diagnostic Accuracy Study", [r"\bdiagnostic\s+accuracy\s+study\b", r"\bdiagnostic\s+test\s+accuracy\b"], 82),
+        ("Observational Study (Cohort)", [r"\bretrospective\s+cohort\s+study\b", r"\bprospective\s+cohort\s+study\b", r"\bcohort\s+study\b"], 80),
+        ("Observational Study (Case-Control)", [r"\bcase-control\s+study\b", r"\bmatched\s+case-control\b"], 78),
+        ("Cross-Sectional Study", [r"\bcross-sectional\s+study\b", r"\bprevalence\s+study\b"], 75),
+        ("Qualitative Study", [r"\bqualitative\s+study\b", r"\bthematic\s+analysis\s+study\b"], 70),
+        ("Narrative Review", [r"\bnarrative\s+review\b", r"\bscoping\s+review\b", r"\bliterature\s+review\b"], 65),
     ]
 
     discovered = []
@@ -552,24 +489,22 @@ def extract_declared_design_ranked(text: str) -> Optional[Tuple[str, str, int]]:
 
     if not discovered:
         return None
-
     discovered.sort(key=lambda x: x[2], reverse=True)
     return discovered[0]
 
 
 def extract_study_features(text: str) -> dict:
     head = text[:9000].lower()
-
     is_review = bool(re.search(r"\b(review|systematic\s+review|meta-analysis|literature\s+search|prisma|scoping\s+review)\b", head))
-    is_guideline = bool(re.search(r"\b(clinical\s+practice\s+guideline|consensus\s+statement|delphi\s+consensus|expert\s+panel\s+recommendations)\b", head))
+    is_guideline = bool(re.search(r"\b(clinical\s+practice\s+guideline|consensus\s+statement|delphi\s+consensus)\b", head))
     is_rct = bool(re.search(r"\b(randomized\s+controlled\s+trial|randomised\s+controlled\s+trial|double-blind|placebo-controlled|\brct\b)\b", head))
     is_intervention = bool(re.search(r"\b(intervention|allocated\s+to|treated\s+with|pre-post|quasi-experimental|before-and-after)\b", head))
     is_diagnostic = bool(re.search(r"\b(diagnostic\s+accuracy|index\s+test|reference\s+standard|sensitivity\s+and\s+specificity|roc\s+curve|auc)\b", head))
     is_prediction = bool(re.search(r"\b(prediction\s+model|risk\s+score|nomogram|prognostic\s+model|validation\s+cohort|c-index|probast)\b", head))
     is_cross_sectional = bool(re.search(r"\b(cross-sectional|survey|prevalence\s+study|questionnaire\s+survey|axis\s+tool)\b", head))
     is_case_control = bool(re.search(r"\b(case-control|cases\s+and\s+controls|matched\s+controls)\b", head))
-    is_cohort = bool(re.search(r"\b(cohort\s+study|prospective\s+cohort|retrospective\s+cohort|longitudinal|follow-up\s+period|retrospective\s+comparative)\b", head))
-    is_qualitative = bool(re.search(r"\b(qualitative\s+study|thematic\s+analysis|semi-structured\s+interview|focus\s+groups|grounded\s+theory|phenomenolog)\b", head))
+    is_cohort = bool(re.search(r"\b(cohort\s+study|prospective\s+cohort|retrospective\s+cohort|longitudinal|follow-up\s+period)\b", head))
+    is_qualitative = bool(re.search(r"\b(qualitative\s+study|thematic\s+analysis|semi-structured\s+interview|focus\s+groups)\b", head))
 
     is_secondary = is_review or is_guideline
     is_primary = not is_secondary or bool(re.search(r"\b(we\s+enrolled|patients\s+were\s+recruited|our\s+cohort|consecutive\s+patients)\b", head))
@@ -578,7 +513,7 @@ def extract_study_features(text: str) -> dict:
         "primary_research": is_primary and not is_guideline,
         "secondary_synthesis": is_secondary,
         "meta_analysis": bool(re.search(r"\b(meta-analysis|forest\s+plot|pooled\s+odds|i\^2|heterogeneity)\b", head)),
-        "systematic_search": bool(re.search(r"\b(prisma|database\s+search|pubmed\s+and\s+embase|search\s+strategy)\b", head)),
+        "systematic_search": bool(re.search(r"\b(prisma|database\s+search|pubmed\s+and\s+embase)\b", head)),
         "guideline_document": is_guideline,
         "randomized": is_rct,
         "intervention_assigned": is_intervention,
@@ -631,21 +566,17 @@ def compute_weighted_keyword_frequencies(text: str) -> str:
         "Randomized Controlled Trial (RCT)": 0,
         "Diagnostic Accuracy Study": 0,
     }
-
     terms = {
-        "Observational Study (Cohort)": ["cohort", "follow-up", "retrospective", "prospective", "incidence", "risk ratio"],
-        "Observational Study (Case-Control)": ["case-control", "case control", "odds ratio", "matched controls"],
-        "Cross-Sectional Study": ["cross-sectional", "prevalence", "survey", "questionnaire"],
-        "Systematic Review / Meta-Analysis": ["prisma", "database search", "search strategy", "systematic review", "meta-analysis"],
-        "Randomized Controlled Trial (RCT)": ["randomized", "randomised", "placebo", "double-blind", "intention-to-treat"],
-        "Diagnostic Accuracy Study": ["sensitivity", "specificity", "index test", "reference standard", "roc curve"],
+        "Observational Study (Cohort)": ["cohort", "follow-up", "retrospective", "prospective"],
+        "Observational Study (Case-Control)": ["case-control", "case control", "odds ratio"],
+        "Cross-Sectional Study": ["cross-sectional", "prevalence", "survey"],
+        "Systematic Review / Meta-Analysis": ["prisma", "database search", "systematic review", "meta-analysis"],
+        "Randomized Controlled Trial (RCT)": ["randomized", "randomised", "placebo", "double-blind"],
+        "Diagnostic Accuracy Study": ["sensitivity", "specificity", "index test", "reference standard"],
     }
-
     for design, word_list in terms.items():
         for w in word_list:
-            scores[design] += (head_title.count(w) * 5)
-            scores[design] += (abstract_zone.count(w) * 3)
-            scores[design] += (body_zone.count(w) * 1)
+            scores[design] += (head_title.count(w) * 5) + (abstract_zone.count(w) * 3) + (body_zone.count(w) * 1)
 
     return max(scores, key=scores.get)
 
@@ -658,19 +589,10 @@ def verify_architecture_with_first_page(
     tools_str = ", ".join(f"'{t}'" for t in candidate_tools if not t.startswith("🔍"))
     verify_prompt = f"""
     You are an expert epidemiological classifier.
-    Examine ONLY the title, abstract, and study design descriptors from Page 1 of this manuscript:
-
+    Examine ONLY the title, abstract, and study design descriptors from Page 1:
     {first_page_text[:4500]}
-
-    Determine whether this is a PRIMARY study (gathering original patient/cohort data) or a SECONDARY SYNTHESIS (review, meta-analysis, guideline).
-    Select the EXACT matching study design from this permitted list:
-    [{tools_str}]
-
-    CRITICAL: Output ONLY a JSON object:
-    {{
-      "confirmed_design": "Selected or identified design name",
-      "rationale": "One-sentence rationale citing title/abstract text"
-    }}
+    Select the EXACT matching study design: [{tools_str}]
+    Output JSON: {{"confirmed_design": "Design name"}}
     """
     for model_name in FREE_ACTIVE_MODELS:
         try:
@@ -693,7 +615,6 @@ def run_four_source_ensemble(
     text: str, client: Optional[genai.Client], available_designs: List[str]
 ) -> dict:
     evidence_points = []
-
     declared_res = extract_declared_design_ranked(text)
     declared_pred = declared_res[0] if declared_res else None
     if declared_pred:
@@ -708,64 +629,32 @@ def run_four_source_ensemble(
 
     llm_pred = verify_architecture_with_first_page(client, text, available_designs)
     if llm_pred:
-        evidence_points.append(f"Page-1 Verifier: Independent analysis confirmed '{llm_pred}'")
+        evidence_points.append(f"Page-1 Verifier: Confirmed '{llm_pred}'")
 
     if declared_pred:
-        if feature_pred == declared_pred:
-            assigned_confidence = 0.98
-            override_msg = "Author declaration confirmed by structural features"
-        else:
-            assigned_confidence = 0.82
-            override_msg = "Author declaration used with caveat (Structural features diverged)"
-        evidence_points.append(f"Adjudication: {override_msg}")
-
-        trace = {
-            "declared_design": declared_pred,
-            "feature_prediction": feature_pred,
-            "keyword_prediction": keyword_pred,
-            "llm_prediction": llm_pred or "N/A",
-            "consensus": declared_pred,
-            "confidence": assigned_confidence,
-        }
-
+        assigned_confidence = 0.98 if feature_pred == declared_pred else 0.82
         return {
             "winner": declared_pred,
             "confidence": assigned_confidence,
-            "trace": trace,
+            "trace": {"declared_design": declared_pred, "feature_prediction": feature_pred, "keyword_prediction": keyword_pred, "llm_prediction": llm_pred or "N/A", "consensus": declared_pred, "confidence": assigned_confidence},
             "evidence": evidence_points,
             "override_applied": True,
         }
 
-    votes = [
-        (feature_pred, 0.50),
-        (llm_pred, 0.35 if llm_pred else 0.0),
-        (keyword_pred, 0.15),
-    ]
-
+    votes = [(feature_pred, 0.50), (llm_pred, 0.35 if llm_pred else 0.0), (keyword_pred, 0.15)]
     scores = {}
-    total_active_weight = 0.0
+    tot_w = 0.0
     for pred, w in votes:
-        if not pred:
-            continue
-        scores[pred] = scores.get(pred, 0.0) + w
-        total_active_weight += w
-
+        if pred:
+            scores[pred] = scores.get(pred, 0.0) + w
+            tot_w += w
     winner = max(scores, key=scores.get) if scores else "Observational Study (Cohort)"
-    raw_confidence = scores[winner] / (total_active_weight if total_active_weight > 0 else 1.0)
-
-    trace = {
-        "declared_design": "None Detected",
-        "feature_prediction": feature_pred,
-        "keyword_prediction": keyword_pred,
-        "llm_prediction": llm_pred or "N/A",
-        "consensus": winner,
-        "confidence": round(raw_confidence, 2),
-    }
+    conf = round(scores[winner] / (tot_w if tot_w > 0 else 1.0), 2)
 
     return {
         "winner": winner,
-        "confidence": round(raw_confidence, 2),
-        "trace": trace,
+        "confidence": conf,
+        "trace": {"declared_design": "None Detected", "feature_prediction": feature_pred, "keyword_prediction": keyword_pred, "llm_prediction": llm_pred or "N/A", "consensus": winner, "confidence": conf},
         "evidence": evidence_points,
         "override_applied": False,
     }
@@ -773,15 +662,12 @@ def run_four_source_ensemble(
 
 def detect_classification_contradiction(manuscript_text: str, predicted_design: str) -> Optional[str]:
     header = manuscript_text[:4000].lower()
-
     if "review" in predicted_design.lower():
-        if any(term in header for term in ["retrospective cohort", "prospective cohort", "comparative study", "consecutive patients", "patients enrolled"]):
-            return "Manuscript explicitly declares an empirical cohort/comparative study, but assigned framework is Review (SANRA/AMSTAR). Appraisal blocked."
-
+        if any(term in header for term in ["retrospective cohort", "prospective cohort", "comparative study", "consecutive patients"]):
+            return "Manuscript explicitly declares an empirical cohort/comparative study, but assigned framework is Review. Appraisal blocked."
     if "cohort" in predicted_design.lower() or "rct" in predicted_design.lower():
         if "systematic review and meta-analysis" in header or "systematic review" in header:
-            return "Manuscript explicitly declares a Systematic Review, but assigned framework is Empirical (NOS/RoB 2). Appraisal blocked."
-
+            return "Manuscript explicitly declares a Systematic Review, but assigned framework is Empirical. Appraisal blocked."
     return None
 
 
@@ -806,7 +692,6 @@ def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.82) -> 
     quote_tokens = clean_tokens(quote)
     if not quote_tokens:
         return True, 1.0
-
     q_len = len(quote_tokens)
     q_str = " ".join(quote_tokens)
     source_clean = " ".join(clean_tokens(source_text))
@@ -891,7 +776,7 @@ def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str
         "purpose": "Precise methodological purpose",
         "domains": [{"name": "Domain Title", "question": "Criterion question"}],
         "scale": "Scoring thresholds and rules",
-        "scoring_guide": "Step-by-step plain-English explanation of how scores are awarded and what thresholds indicate high vs poor quality."
+        "scoring_guide": "Step-by-step plain-English explanation."
       }
     }
     """
@@ -931,39 +816,24 @@ def execute_manuscript_evaluation(
     {taxonomy_json}
 
     CORE ADJUDICATION PRINCIPLE:
-    Absence of reporting must be recorded as 'Unclear Risk' or 'Not Reported' unless the tool explicitly mandates documented evidence for compliance. Do not assume good practice took place without explicit text, but do not invent flaws where reporting is simply terse.
+    Absence of reporting must be recorded as 'Unclear Risk' or 'Not Reported' unless the tool explicitly mandates documented evidence for compliance.
 
-    SPECIALIZED NOS COHORT & CASE-CONTROL SCORING (IF APPLICABLE):
-    If using Newcastle-Ottawa Scale (NOS), calculate exact star counts:
-    - Selection: 0 to 4 Stars
-    - Comparability: 0 to 2 Stars
-    - Outcome/Exposure: 0 to 3 Stars
-    - Total: 0 to 9 Stars
-    - Quality: Good (7-9), Fair (4-6), Poor (0-3).
+    SPECIALIZED NOS SCORING:
+    If using Newcastle-Ottawa Scale (NOS), calculate exact star counts: Selection (0-4), Comparability (0-2), Outcome/Exposure (0-3), Total (0-9).
 
     AUTHORS CITATION FORMAT:
-    Extract up to 3 primary authors in Harvard format (e.g. 'Smith, J., Doe, A. and Brown, C.' or 'Smith, J. et al.' if >3).
+    Extract up to 3 primary authors in Harvard format (e.g. 'Smith, J. et al.').
 
     DOMAIN EVALUATION RULE:
-    For EVERY domain in `domain_appraisals`:
-    - `evaluation_question`: State the EXACT, specific question in plain, simple English (e.g., 'Were the patients and outcome assessors kept unaware of who got the treatment to prevent bias?').
-    - `critique`: Explain clearly what happened in the paper, what was missing or done well, and why that specific score was given.
+    For EVERY domain:
+    - `evaluation_question`: State the EXACT, specific question in plain English.
+    - `critique`: Explain clearly what happened in the paper and why that score was awarded.
 
-    METHODOLOGICAL SYNTHESIS FORMATTING RULE:
-    Provide 4 to 6 clear, easy-to-read bullet points written in simple, accessible language:
-    - Point 1 (Study Setup): Plain-language summary of what the authors did and who was tested.
-    - Point 2 (Key Strengths): What was done well and why the results are trustworthy.
-    - Point 3 (Key Methodological Vulnerabilities): Major risks of bias, missing details, confounding, or unblinded assessment explained simply.
-    - Point 4 (Practical Limitations): What stops us from applying this to every patient/setting (e.g. sample size, short follow-up).
-    - Point 5 (Bottom-Line Reliability): Final verdict on how reliable these findings are for clinical decision-making.
+    METHODOLOGICAL SYNTHESIS:
+    Provide 4 to 6 clear bullet points in simple, accessible language (Study Setup, Strengths, Risks of Bias, Limitations, Bottom-Line).
 
-    STORY-LIKE NARRATIVE ARC SUMMARY (4 TO 10 BULLETS REQUIRED):
-    Provide a compelling, chronological story-like summary of the entire paper and its post-grading appraisal in plain words:
-    1. Act I (The Clinical Dilemma & Spark): What unresolved problem or uncertainty prompted this inquiry?
-    2. Act II (The Patient Cohort & Investigative Journey): Who was studied, how were they followed/intervened, and under what conditions?
-    3. Act III (The Empirical Revelations): What did the data actually show regarding the primary endpoints?
-    4. Act IV (The Auditor's Methodological Reality Check): How did the study hold up under our appraisal tool? Highlight key risks of bias, confounding, blinding/attrition caveats, or notable procedural rigour.
-    5. Act V (The Translational Epilogue): What does this mean for clinical practice today? Adopt, adapt, or treat with extreme caution?
+    STORY-LIKE NARRATIVE ARC (4 TO 10 BULLETS):
+    Provide chronological narrative steps from Act I to Act V.
 
     CRITICAL: Output ONLY a valid JSON object matching:
     {{
@@ -988,64 +858,46 @@ def execute_manuscript_evaluation(
       "overall_verdict": "Low Risk / Moderate Risk / High Risk / Recommended / etc.",
       "overall_synthesis": [
         "Study Setup: [Plain language summary]",
-        "Methodological Strengths: [What was done well in simple terms]",
-        "Risks of Bias & Red Flags: [Plain explanation of flaws or missing data]",
+        "Methodological Strengths: [What was done well]",
+        "Risks of Bias & Red Flags: [Plain explanation of flaws]",
         "Real-World Limitations: [Who this might not apply to]",
         "Auditor Verdict: [Bottom line in plain English]"
       ],
-      "practical_takeaways": [
-        "Primary clinical finding or translational headline",
-        "Key methodological caveat / risk of bias limitation to consider before clinical adoption",
-        "Actionable practice or implementation guideline"
-      ],
-      "narrative_arc_summary": [
-        "Act I — The Clinical Dilemma: [Describe clinical context and question]",
-        "Act II — The Cohort & Journey: [Describe methodology, participants, intervention]",
-        "Act III — The Data Speaks: [Describe findings and statistical endpoints]",
-        "Act IV — The Critical Reality Check: [Appraisal tool post-grading critique and flaws/strengths]",
-        "Act V — The Translational Epilogue: [Final clinical adoption verdict]"
-      ],
+      "practical_takeaways": ["Takeaway 1", "Takeaway 2", "Takeaway 3"],
+      "narrative_arc_summary": ["Act I: ...", "Act II: ...", "Act III: ...", "Act IV: ...", "Act V: ..."],
       "audit_log": {{
-        "classification_rationale": "Keywords and structural features identifying this design",
-        "decision_pathway": [
-          {{"stage": "Domain Evaluation", "observation": "Key observation", "rule_applied": "Grading principle"}}
-        ],
-        "verdict_derivation": "Direct justification for final scores"
+        "classification_rationale": "Rationale",
+        "decision_pathway": [{{"stage": "Stage", "observation": "Obs", "rule_applied": "Rule"}}],
+        "verdict_derivation": "Justification"
       }},
       "tool_meta": {{
         "acronym": "Tool",
         "full_name": "Full Name",
         "purpose": "Purpose",
         "scoring_rules": "Rules",
-        "scoring_guide": "Clear step-by-step breakdown of how the points or quality categories work"
+        "scoring_guide": "Grading explanation"
       }},
       "domain_appraisals": [
         {{
           "domain_name": "Title",
-          "evaluation_question": "Plain-English question being investigated",
+          "evaluation_question": "Plain-English question",
           "rating": "Rating",
           "location_reference": "Section/Page",
           "verbatim_evidence": "Quote",
-          "critique": "Clear explanation of how the paper scored on this question"
+          "critique": "Explanation"
         }}
       ]
     }}
     """
 
     clean_text = trim_manuscript_body(text_content) if text_content else ""
-    contents = []
-    if clean_text and len(clean_text.strip()) > 150:
-        contents = [f"PAPER CONTENT:\n{clean_text}\n\nExecute appraisal and return JSON."]
-    elif raw_pdf_bytes:
-        contents = [
-            types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf"),
-            f"Execute the critical appraisal for {assigned_design} based on the document and return the JSON object."
-        ]
-    else:
+    contents = [f"PAPER CONTENT:\n{clean_text}\n\nExecute appraisal and return JSON."] if (clean_text and len(clean_text.strip()) > 150) else (
+        [types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf"), f"Appraise for {assigned_design}."] if raw_pdf_bytes else None
+    )
+    if not contents:
         raise ValueError("No valid manuscript text or PDF bytes supplied.")
 
     last_exception = None
-
     for model_name in FREE_ACTIVE_MODELS:
         for attempt in range(2):
             try:
@@ -1064,10 +916,8 @@ def execute_manuscript_evaluation(
                     raw_text = re.sub(r"\n```$", "", raw_text)
 
                 parsed = json.loads(raw_text)
-
                 if "authors" in parsed:
                     parsed["authors"] = format_harvard_authors(parsed["authors"], max_authors=3)
-
                 if classification_trace:
                     if "audit_log" not in parsed:
                         parsed["audit_log"] = {}
@@ -1087,126 +937,248 @@ def execute_manuscript_evaluation(
     raise RuntimeError(f"Appraisal pipeline failed on all free models. Details: {str(last_exception)}")
 
 
-def answer_interrogation_query(
+# ==========================================
+# 5. FORENSIC DEEP-DIVE GENERATOR (NO BOILERPLATE, REAL ARITHMETIC)
+# ==========================================
+def generate_forensic_deep_dive(
     client: genai.Client,
-    query: str,
-    appraisal_json: dict,
-    raw_manuscript_text: str,
-    chat_history: List[dict]
-) -> str:
-    history_context = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in chat_history[-6:]])
-    chat_instruction = f"""
-    You are an objective methodological audit assistant.
-    Answer user queries regarding the appraisal report and source manuscript in simple, direct language.
-    Avoid overly dense jargon. Cite specific lines, sections, and quotes clearly.
+    base_data: dict,
+    full_text: str
+) -> dict:
+    tool_name = base_data.get("appraisal_tool_selected", "Assigned Tool")
+    design = base_data.get("study_design", "Assigned Design")
 
-    APPRAISAL JSON:
-    {json.dumps(appraisal_json, indent=1)}
+    deep_prompt = f"""
+    You are a forensic academic peer-reviewer and clinical trial statistician auditing this paper:
+    Title: {base_data.get('paper_title')}
+    Tool: {tool_name} ({design})
 
-    SOURCE TEXT:
-    {raw_manuscript_text[:20000]}
+    MANUSCRIPT TEXT:
+    {full_text[:35000]}
+
+    STRICT FORENSIC REQUIREMENTS:
+    1. EXPLICIT ARITHMETIC SHOWN:
+       - If Newcastle-Ottawa Scale (NOS): Show exact star count math (Selection: X/4 + Comparability: Y/2 + Outcome: Z/3 = Total Stars / 9) and calculate the percentage.
+       - If AGREE II: Calculate explicit standardized score formula: (Obtained score - Minimum possible) / (Maximum possible - Minimum possible) × 100%.
+       - If Cochrane RoB 2 / AMSTAR 2 / ROBINS-I / QUADAS-2: Calculate exact ratio of Low vs Some Concerns vs High Risk domains, count critical domain violations, and demonstrate why the overall rating was mathematically triggered.
+    2. ZERO RISK-OF-BIAS BOILERPLATE:
+       - DO NOT state generic definitions like 'Blinding is important because it prevents observer bias' or 'Randomization ensures balance'.
+       - Jump straight to empirical manuscript facts: exact participant counts, lost-to-follow-up numbers, missing variables, p-values, or diagnostic cutoff choices.
+    3. AT LEAST 2 TO 3 SUBSTANTIVE CONTENT CRITICISMS:
+       - Deep, rigorous critique of the research logic itself (e.g., immortal time bias, confounding by indication, survivorship bias, underpowered subgroup comparisons, inappropriate surrogate endpoints, or unmeasured confounding variables).
+
+    CRITICAL: Output ONLY a JSON object:
+    {{
+      "arithmetic_breakdown": {{
+        "formula_used": "The mathematical equation or grading rule",
+        "step_by_step_calculation": "Step-by-step arithmetic showing how the score was calculated",
+        "final_tally": "Final numerical score or percentage"
+      }},
+      "substantive_criticisms": [
+        {{
+          "flaw_title": "Name of Methodological Deficit 1",
+          "manuscript_evidence": "Line numbers, sample counts, or exact quote",
+          "epidemiological_impact": "Direct scientific impact on internal validity"
+        }},
+        {{
+          "flaw_title": "Name of Methodological Deficit 2",
+          "manuscript_evidence": "Line numbers, sample counts, or exact quote",
+          "epidemiological_impact": "Direct scientific impact on internal validity"
+        }},
+        {{
+          "flaw_title": "Name of Methodological Deficit 3",
+          "manuscript_evidence": "Line numbers, sample counts, or exact quote",
+          "epidemiological_impact": "Direct scientific impact on internal validity"
+        }}
+      ],
+      "domain_deep_dives": [
+        {{
+          "domain_name": "Domain name",
+          "score_awarded": "Grade or Star",
+          "direct_empirical_finding": "Pure manuscript fact without boilerplate",
+          "statistical_or_design_flaw": "Specific vulnerability identified"
+        }}
+      ]
+    }}
     """
+
     for model_name in FREE_ACTIVE_MODELS:
         try:
             response = client.models.generate_content(
                 model=model_name,
-                contents=[f"HISTORY:\n{history_context}\n\nUSER QUESTION: {query}"],
-                config=types.GenerateContentConfig(system_instruction=chat_instruction, temperature=0.1)
+                contents=[deep_prompt],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.0,
+                ),
             )
-            return response.text
+            raw = response.text.strip()
+            if raw.startswith("```"):
+                raw = re.sub(r"^```(?:json)?\n", "", raw)
+                raw = re.sub(r"\n```$", "", raw)
+            return json.loads(raw)
         except Exception:
             continue
-    return "Failed to query audit assistant across all active models."
+
+    raise RuntimeError("Deep-dive forensic audit failed on active models.")
 
 
-# ==========================================
-# 5. DOCUMENT GENERATION (WORD & CONCISE PDF)
-# ==========================================
-def build_docx_report(data: dict) -> io.BytesIO:
+def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=letter,
+        rightMargin=32,
+        leftMargin=32,
+        topMargin=26,
+        bottomMargin=26
+    )
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "T", parent=styles["Heading1"], fontSize=15, leading=18, textColor=colors.HexColor("#7A1C1C"), fontName="Helvetica-Bold", spaceAfter=2
+    )
+    sec_heading = ParagraphStyle(
+        "SH", parent=styles["Heading2"], fontSize=10, leading=13, textColor=colors.HexColor("#4A1515"), fontName="Helvetica-Bold", spaceBefore=7, spaceAfter=4
+    )
+    body_style = ParagraphStyle("B", parent=styles["Normal"], fontSize=8, leading=10.5, fontName="Helvetica")
+    bold_style = ParagraphStyle("BB", parent=body_style, fontName="Helvetica-Bold")
+    header_style = ParagraphStyle("H", parent=body_style, fontName="Helvetica-Bold", textColor=colors.white)
+
+    story = [
+        Paragraph(f"{APP_NAME} — Forensic Methodological Audit & Content Critique", title_style),
+        Spacer(1, 4),
+    ]
+
+    harvard_authors = format_harvard_authors(base_data.get("authors", "Not Specified"), max_authors=3)
+    meta_data = [
+        [Paragraph(f"<b>Evaluated Manuscript:</b> {base_data.get('paper_title', 'N/A')}", body_style), Paragraph(f"<b>Authors:</b> {harvard_authors} ({base_data.get('year_published', 'N/A')})", body_style)],
+        [Paragraph(f"<b>Architecture:</b> {base_data.get('study_design', 'N/A')} | <b>Tool:</b> {base_data.get('appraisal_tool_selected', 'N/A')}", body_style), Paragraph(f"<b>Overall Score:</b> {base_data.get('overall_verdict', 'N/A')}", bold_style)],
+    ]
+    t_meta = Table(meta_data, colWidths=[4.2 * inch, 3.4 * inch])
+    t_meta.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FDEDEC')),
+        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#C0392B')),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E6B0AA')),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(t_meta)
+    story.append(Spacer(1, 6))
+
+    # 1. Arithmetic Breakdown Table
+    story.append(Paragraph("<b>1. Detailed Mathematical & Scoring Arithmetic</b>", sec_heading))
+    arith = deep_dive.get("arithmetic_breakdown", {})
+    arith_rows = [
+        [Paragraph("<b>Mathematical Formula / Rule:</b>", bold_style), Paragraph(arith.get("formula_used", "N/A"), body_style)],
+        [Paragraph("<b>Step-by-Step Calculation:</b>", bold_style), Paragraph(arith.get("step_by_step_calculation", "N/A"), body_style)],
+        [Paragraph("<b>Final Calculated Tally:</b>", bold_style), Paragraph(f"<b>{arith.get('final_tally', 'N/A')}</b>", bold_style)],
+    ]
+    t_arith = Table(arith_rows, colWidths=[2.2 * inch, 5.4 * inch])
+    t_arith.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FDFEFE')),
+        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#BDC3C7')),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#EAEDED')),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(t_arith)
+    story.append(Spacer(1, 6))
+
+    # 2. Substantive Content Criticisms
+    story.append(Paragraph("<b>2. Substantive Content Criticisms & Methodological Vulnerabilities</b>", sec_heading))
+    crit_rows = [[Paragraph("Identified Deficit", header_style), Paragraph("Manuscript Empirical Fact / Quote", header_style), Paragraph("Scientific & Epidemiological Impact", header_style)]]
+    for c in deep_dive.get("substantive_criticisms", []):
+        crit_rows.append([
+            Paragraph(f"<b>{c.get('flaw_title')}</b>", bold_style),
+            Paragraph(c.get("manuscript_evidence", ""), body_style),
+            Paragraph(c.get("epidemiological_impact", ""), body_style),
+        ])
+    t_crit = Table(crit_rows, colWidths=[2.2 * inch, 2.7 * inch, 2.7 * inch], repeatRows=1)
+    t_crit.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#A93226')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D5D8DC')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(t_crit)
+    story.append(Spacer(1, 6))
+
+    # 3. Domain Deep Dive (Boilerplate Stripped)
+    story.append(Paragraph("<b>3. Domain-Specific Audit (Boilerplate Free)</b>", sec_heading))
+    d_rows = [[Paragraph("Domain", header_style), Paragraph("Score", header_style), Paragraph("Direct Empirical Finding in Text", header_style), Paragraph("Identified Design / Statistical Vulnerability", header_style)]]
+    for d in deep_dive.get("domain_deep_dives", []):
+        d_rows.append([
+            Paragraph(f"<b>{d.get('domain_name')}</b>", bold_style),
+            Paragraph(d.get("score_awarded", ""), bold_style),
+            Paragraph(d.get("direct_empirical_finding", ""), body_style),
+            Paragraph(d.get("statistical_or_design_flaw", ""), body_style),
+        ])
+    t_d = Table(d_rows, colWidths=[1.8 * inch, 0.9 * inch, 2.5 * inch, 2.4 * inch], repeatRows=1)
+    t_d.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#5D6D7E')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D5D8DC')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(t_d)
+
+    doc.build(story)
+    buf.seek(0)
+    return buf
+
+
+def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     doc = Document()
     title = doc.add_heading(level=0)
-    run_t = title.add_run(f"{APP_NAME} — Methodological Evaluation")
-    run_t.font.size = Pt(20)
+    run_t = title.add_run(f"{APP_NAME} — Forensic Methodological Audit & Content Critique")
+    run_t.font.size = Pt(18)
     run_t.font.bold = True
-    run_t.font.color.rgb = RGBColor(120, 187, 166)
+    run_t.font.color.rgb = RGBColor(180, 40, 40)
 
-    ratings = data.get("ratings_summary", {})
-    harvard_authors = format_harvard_authors(data.get("authors", "Not Specified"), max_authors=3)
+    harvard_authors = format_harvard_authors(base_data.get("authors", "Not Specified"), max_authors=3)
+    p_meta = doc.add_paragraph()
+    p_meta.add_run("Evaluated Manuscript: ").bold = True
+    p_meta.add_run(f"{base_data.get('paper_title')} ({harvard_authors}, {base_data.get('year_published')})\n")
+    p_meta.add_run(f"Architecture: {base_data.get('study_design')} | Tool Applied: {base_data.get('appraisal_tool_selected')}\n")
 
-    meta_table = doc.add_table(rows=8, cols=2)
-    meta_table.style = "Table Grid"
-    fields = [
-        ("Evaluated Title:", data.get("paper_title", "N/A")),
-        ("Authors (Harvard):", harvard_authors),
-        ("Journal & Year:", f"{data.get('journal', 'N/A')} ({data.get('year_published', 'N/A')})"),
-        ("DOI / Reference:", data.get("doi", "N/A")),
-        ("Study Architecture:", data.get("study_design", "N/A")),
-        ("Tool Applied:", data.get("appraisal_tool_selected", "N/A")),
-        ("Methodology / Reporting / Certainty:", f"{ratings.get('methodology_quality', 'N/A')} / {ratings.get('reporting_quality', 'N/A')} / {ratings.get('certainty_score', 'N/A')}"),
-        ("Evidence Groundedness:", f"{data.get('groundedness_score', 100.0)}%"),
-    ]
-    for idx, (label, val) in enumerate(fields):
-        row = meta_table.rows[idx]
-        shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="EBF5F2"/>')
-        row.cells[0]._tc.get_or_add_tcPr().append(shd)
-        row.cells[0].paragraphs[0].add_run(label).bold = True
-        row.cells[1].paragraphs[0].add_run(str(val))
+    # 1. Arithmetic Breakdown
+    doc.add_heading("1. Mathematical Arithmetic & Score Tally", level=1)
+    arith = deep_dive.get("arithmetic_breakdown", {})
+    doc.add_paragraph(f"Formula / Rule: {arith.get('formula_used', 'N/A')}")
+    doc.add_paragraph(f"Step-by-Step Calculation:\n{arith.get('step_by_step_calculation', 'N/A')}")
+    p_fin = doc.add_paragraph()
+    p_fin.add_run(f"Final Score / Tally: {arith.get('final_tally', 'N/A')}").bold = True
 
-    doc.add_paragraph("")
+    # 2. Substantive Criticisms
+    doc.add_heading("2. Substantive Content Criticisms", level=1)
+    for idx, c in enumerate(deep_dive.get("substantive_criticisms", []), 1):
+        p_c = doc.add_paragraph(style='List Bullet')
+        p_c.add_run(f"{idx}. {c.get('flaw_title')}: ").bold = True
+        p_c.add_run(f"{c.get('manuscript_evidence')}\n")
+        p_c.add_run(f"Epidemiological Impact: {c.get('epidemiological_impact')}")
 
-    takeaways = data.get("practical_takeaways", [])
-    if takeaways:
-        doc.add_heading("Practical Takeaways from the Paper (At-A-Glance)", level=2)
-        for idx, pt in enumerate(takeaways, 1):
-            p_t = doc.add_paragraph(style='List Bullet')
-            p_t.add_run(f"Takeaway #{idx}: ").bold = True
-            p_t.add_run(pt)
-
-    story_arc = data.get("narrative_arc_summary", [])
-    if story_arc:
-        doc.add_heading("Narrative Story Arc & Post-Grading Appraisal Journey", level=2)
-        for idx, pt in enumerate(story_arc, 1):
-            p_s = doc.add_paragraph(style='List Number')
-            parts = pt.split(":", 1)
-            if len(parts) == 2:
-                p_s.add_run(parts[0] + ":").bold = True
-                p_s.add_run(parts[1])
-            else:
-                p_s.add_run(pt)
-
-    doc.add_paragraph("")
-    doc.add_heading(f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})", level=1)
+    # 3. Domain Deep Dive
+    doc.add_heading("3. Domain Evaluation (Boilerplate Stripped)", level=1)
     table = doc.add_table(rows=1, cols=4)
     table.style = "Table Grid"
-    for i, h in enumerate(["Domain & Question", "Score", "Evidence", "Critique"]):
+    headers = ["Domain", "Score", "Direct Manuscript Finding", "Methodological Vulnerability"]
+    for i, h in enumerate(headers):
         cell = table.rows[0].cells[i]
-        shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="78BBA6"/>')
+        shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="A93226"/>')
         cell._tc.get_or_add_tcPr().append(shd)
         r = cell.paragraphs[0].add_run(h)
         r.bold = True
         r.font.color.rgb = RGBColor(255, 255, 255)
 
-    for item in data.get("domain_appraisals", []):
-        row_cells = table.add_row().cells
-        row_cells[0].paragraphs[0].add_run(f"{item.get('domain_name')}\n\nQuestion: \"{item.get('evaluation_question')}\"")
-        row_cells[1].paragraphs[0].add_run(str(item.get("rating")))
-        row_cells[2].paragraphs[0].add_run(f"[{item.get('location_reference')}]\n\"{item.get('verbatim_evidence')}\"")
-        row_cells[3].paragraphs[0].add_run(str(item.get("critique")))
-
-    doc.add_paragraph("")
-    doc.add_heading("2. Methodological Synthesis & Discussion (Key Points)", level=1)
-    synth = data.get("overall_synthesis", [])
-    if isinstance(synth, list):
-        for pt in synth:
-            parts = pt.split(":", 1)
-            p_synth = doc.add_paragraph(style='List Bullet')
-            if len(parts) == 2:
-                p_synth.add_run(parts[0] + ":").bold = True
-                p_synth.add_run(parts[1])
-            else:
-                p_synth.add_run(pt)
-    else:
-        doc.add_paragraph(str(synth))
+    for d in deep_dive.get("domain_deep_dives", []):
+        row = table.add_row().cells
+        row[0].paragraphs[0].add_run(d.get("domain_name", "")).bold = True
+        row[1].paragraphs[0].add_run(d.get("score_awarded", ""))
+        row[2].paragraphs[0].add_run(d.get("direct_empirical_finding", ""))
+        row[3].paragraphs[0].add_run(d.get("statistical_or_design_flaw", ""))
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -1214,6 +1186,9 @@ def build_docx_report(data: dict) -> io.BytesIO:
     return buf
 
 
+# ==========================================
+# 6. DOCUMENT GENERATION (STANDARD EXECUTIVE REPORTS)
+# ==========================================
 def build_pdf_report(data: dict) -> io.BytesIO:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -1227,49 +1202,16 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     styles = getSampleStyleSheet()
 
     title_style = ParagraphStyle(
-        "T",
-        parent=styles["Heading1"],
-        fontSize=15,
-        leading=18,
-        textColor=colors.HexColor("#2C5247"),
-        fontName="Helvetica-Bold",
-        spaceAfter=2,
+        "T", parent=styles["Heading1"], fontSize=15, leading=18, textColor=colors.HexColor("#2C5247"), fontName="Helvetica-Bold", spaceAfter=2
     )
     sec_heading = ParagraphStyle(
-        "SH",
-        parent=styles["Heading2"],
-        fontSize=10,
-        leading=13,
-        textColor=colors.HexColor("#1D3B32"),
-        fontName="Helvetica-Bold",
-        spaceBefore=7,
-        spaceAfter=4,
+        "SH", parent=styles["Heading2"], fontSize=10, leading=13, textColor=colors.HexColor("#1D3B32"), fontName="Helvetica-Bold", spaceBefore=7, spaceAfter=4
     )
-    body_style = ParagraphStyle(
-        "B",
-        parent=styles["Normal"],
-        fontSize=8,
-        leading=10.5,
-        fontName="Helvetica",
-    )
+    body_style = ParagraphStyle("B", parent=styles["Normal"], fontSize=8, leading=10.5, fontName="Helvetica")
     bold_style = ParagraphStyle("BB", parent=body_style, fontName="Helvetica-Bold")
     header_style = ParagraphStyle("H", parent=body_style, fontName="Helvetica-Bold", textColor=colors.white)
-    question_style = ParagraphStyle(
-        "QS",
-        parent=body_style,
-        fontSize=7.5,
-        leading=9.5,
-        textColor=colors.HexColor("#1E3F35"),
-        fontName="Helvetica-Oblique",
-    )
-    quote_style = ParagraphStyle(
-        "Q",
-        parent=body_style,
-        fontSize=7.5,
-        leading=9.5,
-        textColor=colors.HexColor("#555555"),
-        fontName="Helvetica-Oblique",
-    )
+    question_style = ParagraphStyle("QS", parent=body_style, fontSize=7.5, leading=9.5, textColor=colors.HexColor("#1E3F35"), fontName="Helvetica-Oblique")
+    quote_style = ParagraphStyle("Q", parent=body_style, fontSize=7.5, leading=9.5, textColor=colors.HexColor("#555555"), fontName="Helvetica-Oblique")
 
     story = [
         Paragraph(f"{APP_NAME} — Clinical Evidence Appraisal", title_style),
@@ -1286,25 +1228,13 @@ def build_pdf_report(data: dict) -> io.BytesIO:
         active_tier = "YELLOW"
     else:
         v = str(data.get("overall_verdict", "")).lower()
-        if any(w in v for w in ["low risk", "recommended", "high quality"]):
-            active_tier = "GREEN"
-        elif any(w in v for w in ["high risk", "serious", "critical"]):
-            active_tier = "RED"
-        else:
-            active_tier = "YELLOW"
+        active_tier = "GREEN" if any(w in v for w in ["low risk", "recommended"]) else ("RED" if any(w in v for w in ["high risk", "critical"]) else "YELLOW")
 
     harvard_authors = format_harvard_authors(data.get("authors", "Not Specified"), max_authors=3)
 
-    # 1. Compact Header Metadata Bar
     meta_data = [
-        [
-            Paragraph(f"<b>Title:</b> {data.get('paper_title', 'N/A')}", body_style),
-            Paragraph(f"<b>Authors:</b> {harvard_authors} ({data.get('year_published', 'N/A')})", body_style),
-        ],
-        [
-            Paragraph(f"<b>Design:</b> {data.get('study_design', 'N/A')} | <b>Tool:</b> {data.get('appraisal_tool_selected', 'N/A')}", body_style),
-            Paragraph(f"<b>Quality Triad:</b> Method: <b>{ratings.get('methodology_quality', 'N/A')}</b> | Report: <b>{ratings.get('reporting_quality', 'N/A')}</b> | Certainty: <b>{ratings.get('certainty_score', 'N/A')}</b>", body_style),
-        ],
+        [Paragraph(f"<b>Title:</b> {data.get('paper_title', 'N/A')}", body_style), Paragraph(f"<b>Authors:</b> {harvard_authors} ({data.get('year_published', 'N/A')})", body_style)],
+        [Paragraph(f"<b>Design:</b> {data.get('study_design', 'N/A')} | <b>Tool:</b> {data.get('appraisal_tool_selected', 'N/A')}", body_style), Paragraph(f"<b>Quality Triad:</b> Method: <b>{ratings.get('methodology_quality', 'N/A')}</b> | Report: <b>{ratings.get('reporting_quality', 'N/A')}</b> | Certainty: <b>{ratings.get('certainty_score', 'N/A')}</b>", body_style)],
     ]
     t_meta = Table(meta_data, colWidths=[4.2 * inch, 3.4 * inch])
     t_meta.setStyle(TableStyle([
@@ -1317,7 +1247,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_meta)
     story.append(Spacer(1, 6))
 
-    # 2. Visual Tier Banner
     r_txt = "<b>✓ HIGH RISK / POOR</b>" if active_tier == "RED" else "HIGH RISK / POOR"
     y_txt = "<b>✓ MODERATE / FAIR</b>" if active_tier == "YELLOW" else "MODERATE / FAIR"
     g_txt = "<b>✓ ROBUST / GOOD</b>" if active_tier == "GREEN" else "ROBUST / GOOD"
@@ -1341,10 +1270,8 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_gauge)
     story.append(Spacer(1, 6))
 
-    # 3. Two-Column Box: Practical Takeaways & Methodological Synthesis
     takeaways = data.get("practical_takeaways", [])
     synth = data.get("overall_synthesis", [])
-
     col_left = [Paragraph("<b>💡 Key Practical Takeaways</b>", sec_heading)]
     for idx, item in enumerate(takeaways[:3], 1):
         col_left.append(Paragraph(f"• <b>#{idx}:</b> {item}", body_style))
@@ -1372,14 +1299,8 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_split)
     story.append(Spacer(1, 8))
 
-    # 4. Domain-by-Domain Evaluation Table (With explicit question clearly separated)
     story.append(Paragraph(f"<b>Domain-by-Domain Evaluation & Core Questions ({data.get('appraisal_tool_selected', 'Tool')})</b>", sec_heading))
-    domain_data = [[
-        Paragraph("Domain & Specific Question Investigated", header_style),
-        Paragraph("Score / Grade", header_style),
-        Paragraph("Plain-English Assessment & Grounded Evidence", header_style)
-    ]]
-
+    domain_data = [[Paragraph("Domain & Specific Question", header_style), Paragraph("Score", header_style), Paragraph("Plain-English Assessment & Grounded Evidence", header_style)]]
     for d in data.get("domain_appraisals", []):
         r_str = str(d.get("rating", ""))
         question = d.get("evaluation_question", "")
@@ -1387,22 +1308,13 @@ def build_pdf_report(data: dict) -> io.BytesIO:
         loc = d.get("location_reference", "")
         critique = d.get("critique", "")
 
-        domain_cell = [
-            Paragraph(f"<b>{d.get('domain_name')}</b>", bold_style),
-            Spacer(1, 2),
-            Paragraph(f"<b>Question:</b> \"{question}\"", question_style)
-        ]
-
+        domain_cell = [Paragraph(f"<b>{d.get('domain_name')}</b>", bold_style), Spacer(1, 2), Paragraph(f"<b>Question:</b> \"{question}\"", question_style)]
         evidence_cell = [Paragraph(critique, body_style)]
         if quote and quote.lower() not in ["none", "not reported", "n/a"]:
             evidence_cell.append(Spacer(1, 2))
             evidence_cell.append(Paragraph(f"[{loc}] \"{quote}\"", quote_style))
 
-        domain_data.append([
-            domain_cell,
-            Paragraph(f"<b>{r_str}</b>", bold_style),
-            evidence_cell
-        ])
+        domain_data.append([domain_cell, Paragraph(f"<b>{r_str}</b>", bold_style), evidence_cell])
 
     t_domains = Table(domain_data, colWidths=[2.5 * inch, 1.0 * inch, 4.1 * inch], repeatRows=1)
     t_style = [
@@ -1419,7 +1331,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_domains)
     story.append(Spacer(1, 8))
 
-    # 5. Dedicated Scoring System & Grading Guide Appendix
     tool_meta = data.get("tool_meta", {})
     acronym = tool_meta.get("acronym") or data.get("appraisal_tool_selected", "Tool")
     full_name = tool_meta.get("full_name") or "Standard Critical Appraisal Instrument"
@@ -1429,17 +1340,12 @@ def build_pdf_report(data: dict) -> io.BytesIO:
 
     design_match = SEED_TAXONOMY.get(data.get("study_design", ""))
     if design_match:
-        if not full_name or full_name == "Standard Critical Appraisal Instrument":
-            full_name = design_match.get("full_name", full_name)
-        if not purpose or "Standardized epidemiological" in purpose:
-            purpose = design_match.get("purpose", purpose)
-        if not scoring_rules or "Standard qualitative" in scoring_rules:
-            scoring_rules = design_match.get("scale", scoring_rules)
-        if not scoring_guide:
-            scoring_guide = design_match.get("scoring_guide", "")
+        full_name = design_match.get("full_name", full_name)
+        purpose = design_match.get("purpose", purpose)
+        scoring_rules = design_match.get("scale", scoring_rules)
+        scoring_guide = design_match.get("scoring_guide", scoring_guide)
 
     story.append(Paragraph("<b>Appraisal Framework & Grading System Explanation</b>", sec_heading))
-
     guide_paragraphs = []
     if scoring_guide:
         for line in scoring_guide.strip().split("\n"):
@@ -1453,7 +1359,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
         [Paragraph("Tool Applied:", bold_style), Paragraph(f"<b>{full_name} ({acronym})</b>", body_style)],
         [Paragraph("Clinical Purpose:", bold_style), Paragraph(purpose, body_style)],
         [Paragraph("How Grading Works:", bold_style), guide_paragraphs],
-        [Paragraph("How to Interpret:", bold_style), Paragraph("High scores or 'Low Risk' ratings mean the research methods were carried out properly without major biases. Low scores or 'High Risk' warnings highlight critical flaws (such as missing participants or unblinded testing) that could make the treatment appear more effective than it really is.", body_style)],
+        [Paragraph("How to Interpret:", bold_style), Paragraph("High scores or 'Low Risk' ratings confirm the study methodology is sound. Lower scores highlight vulnerabilities that necessitate caution before changing clinical practice.", body_style)],
     ]
     t_app = Table(appendix_rows, colWidths=[1.8 * inch, 5.8 * inch])
     t_app.setStyle(TableStyle([
@@ -1472,8 +1378,40 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     return buf
 
 
+def answer_interrogation_query(
+    client: genai.Client,
+    query: str,
+    appraisal_json: dict,
+    raw_manuscript_text: str,
+    chat_history: List[dict]
+) -> str:
+    history_context = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in chat_history[-6:]])
+    chat_instruction = f"""
+    You are an objective methodological audit assistant.
+    Answer user queries regarding the appraisal report and source manuscript in simple, direct language.
+    Cite specific lines, sections, and quotes clearly.
+
+    APPRAISAL JSON:
+    {json.dumps(appraisal_json, indent=1)}
+
+    SOURCE TEXT:
+    {raw_manuscript_text[:20000]}
+    """
+    for model_name in FREE_ACTIVE_MODELS:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[f"HISTORY:\n{history_context}\n\nUSER QUESTION: {query}"],
+                config=types.GenerateContentConfig(system_instruction=chat_instruction, temperature=0.1)
+            )
+            return response.text
+        except Exception:
+            continue
+    return "Failed to query audit assistant across all active models."
+
+
 # ==========================================
-# 6. STREAMLIT APP & UI INTERACTION
+# 7. STREAMLIT APP & UI INTERACTION
 # ==========================================
 st.set_page_config(page_title=APP_NAME, page_icon="🐱", layout="wide")
 init_db()
@@ -1497,23 +1435,13 @@ st.markdown(
     .stButton>button:active, .stDownloadButton>button:active {
         background-color: #4A8574 !important;
     }
-    div[data-testid="stChatInput"] button {
-        background-color: #78BBA6 !important;
-        color: white !important;
-    }
-    div[data-testid="stChatInput"] textarea:focus {
-        border-color: #78BBA6 !important;
-        box-shadow: 0 0 0 1px #78BBA6 !important;
-    }
-    .metric-card {
-        background-color: rgba(120, 187, 166, 0.08);
-        border: 1px solid rgba(120, 187, 166, 0.3);
+    .deepdive-box {
+        background-color: #FDEDEC;
+        border: 1px solid #C0392B;
         border-radius: 8px;
         padding: 12px;
-    }
-    div[role="radiogroup"] > label > div:first-child[aria-checked="true"] {
-        background-color: #78BBA6 !important;
-        border-color: #78BBA6 !important;
+        margin-top: 10px;
+        margin-bottom: 10px;
     }
 </style>
 """,
@@ -1547,6 +1475,8 @@ if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
 if "raw_paper_text" not in st.session_state:
     st.session_state["raw_paper_text"] = ""
+if "deep_dive_data" not in st.session_state:
+    st.session_state["deep_dive_data"] = None
 
 with st.sidebar:
     st.header("⚙️ Configuration")
@@ -1578,6 +1508,7 @@ with st.sidebar:
             with c_load:
                 if st.button("Load", key=f"v_{r['id']}", use_container_width=True):
                     st.session_state["appraisal_data"] = get_appraisal_by_id(r["id"])
+                    st.session_state["deep_dive_data"] = None
                     st.session_state["chat_history"] = []
                     st.rerun()
             with c_del:
@@ -1710,6 +1641,7 @@ if st.button("⚡ Run Methodological Appraisal", type="primary", use_container_w
                 verified_data, score, _, flaw_warns = run_comprehensive_checksum(raw_data, paper_text)
                 new_id = save_appraisal(verified_data, filename_tag)
                 st.session_state["appraisal_data"] = verified_data
+                st.session_state["deep_dive_data"] = None
                 st.session_state["chat_history"] = []
                 st.success(f"Completed and saved (ID: #{new_id})")
                 st.rerun()
@@ -1784,25 +1716,11 @@ if "appraisal_data" in st.session_state:
     else:
         st.info(str(synth))
 
-    audit = data.get("audit_log", {})
-    if audit:
-        with st.expander("🔍 Methodological Decision Log & Audit Trail"):
-            st.markdown("#### Study Classification Rationale")
-            st.write(audit.get("classification_rationale", "N/A"))
-            if audit.get("classification_trace"):
-                st.markdown("#### 4-Source Ensemble Trace")
-                st.json(audit["classification_trace"])
-            steps = audit.get("decision_pathway", [])
-            if steps:
-                st.markdown("#### Decision Pathway & Applied Rules")
-                st.dataframe(steps, use_container_width=True)
-            st.markdown("#### Verdict Derivation")
-            st.write(audit.get("verdict_derivation", "N/A"))
-
+    # Standard Executive Downloads
     c_doc, c_pdf, c_log = st.columns(3)
     with c_doc:
         st.download_button(
-            "📥 Download Word (.docx)",
+            "📥 Download Executive Word (.docx)",
             data=build_docx_report(data),
             file_name=format_harvard_filename(data, "docx"),
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1810,31 +1728,14 @@ if "appraisal_data" in st.session_state:
         )
     with c_pdf:
         st.download_button(
-            "📥 Download PDF (.pdf)",
+            "📥 Download Executive PDF (.pdf)",
             data=build_pdf_report(data),
             file_name=format_harvard_filename(data, "pdf"),
             mime="application/pdf",
             use_container_width=True,
         )
     with c_log:
-        audit_payload = json.dumps(
-            {
-                "paper_title": data.get("paper_title"),
-                "authors_harvard": harvard_display_authors,
-                "study_design": data.get("study_design"),
-                "appraisal_tool_selected": data.get("appraisal_tool_selected"),
-                "ratings_summary": data.get("ratings_summary", {}),
-                "nos_score_breakdown": data.get("nos_score_breakdown", {}),
-                "overall_verdict": data.get("overall_verdict"),
-                "overall_synthesis": data.get("overall_synthesis", []),
-                "practical_takeaways": data.get("practical_takeaways", []),
-                "narrative_arc_summary": data.get("narrative_arc_summary", []),
-                "audit_log": data.get("audit_log", {}),
-                "checksum_flaws": data.get("checksum_flaws", []),
-                "groundedness_score": data.get("groundedness_score"),
-            },
-            indent=2,
-        )
+        audit_payload = json.dumps(data, indent=2)
         st.download_button(
             "📥 Download Audit Log (.json)",
             data=audit_payload,
@@ -1843,8 +1744,56 @@ if "appraisal_data" in st.session_state:
             use_container_width=True,
         )
 
+    # --- FORENSIC DEEP-DIVE TRIGGER & DISPLAY ---
     st.markdown("---")
-    st.subheader("💬 Ki's Assistant")
+    st.subheader("🔬 Advanced Forensic Deep-Dive (Optional)")
+    st.caption("Generates explicit score arithmetic, strips all generic risk-of-bias definitions, and details 2–3 substantive content criticisms.")
+
+    if st.button("Generate Forensic Deep-Dive Report", type="secondary"):
+        if not api_key:
+            st.error("Access key required.")
+        else:
+            client = genai.Client(api_key=api_key)
+            with st.spinner("Extracting explicit arithmetic and isolating content criticisms..."):
+                try:
+                    deep_dive_res = generate_forensic_deep_dive(client, data, st.session_state.get("raw_paper_text", ""))
+                    st.session_state["deep_dive_data"] = deep_dive_res
+                    st.success("Forensic deep-dive generated successfully.")
+                    st.rerun()
+                except Exception as err:
+                    st.error(f"Error generating deep-dive: {err}")
+
+    if st.session_state.get("deep_dive_data"):
+        dd = st.session_state["deep_dive_data"]
+        with st.container():
+            st.markdown("#### 🧮 Mathematical & Arithmetic Tally")
+            arith = dd.get("arithmetic_breakdown", {})
+            st.info(f"**Formula:** {arith.get('formula_used', 'N/A')}\n\n**Step-by-Step:**\n{arith.get('step_by_step_calculation', 'N/A')}\n\n**Final Result:** {arith.get('final_tally', 'N/A')}")
+
+            st.markdown("#### ⚠️ Substantive Content Criticisms")
+            for c in dd.get("substantive_criticisms", []):
+                st.error(f"**{c.get('flaw_title')}:** {c.get('manuscript_evidence')}\n\n*Impact:* {c.get('epidemiological_impact')}")
+
+            c_dd_doc, c_dd_pdf = st.columns(2)
+            with c_dd_doc:
+                st.download_button(
+                    "📥 Download Forensic Deep-Dive (.docx)",
+                    data=build_deep_dive_docx_report(data, dd),
+                    file_name=format_harvard_filename(data, "docx", tag="Forensic_Audit"),
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                )
+            with c_dd_pdf:
+                st.download_button(
+                    "📥 Download Forensic Deep-Dive (.pdf)",
+                    data=build_deep_dive_pdf_report(data, dd),
+                    file_name=format_harvard_filename(data, "pdf", tag="Forensic_Audit"),
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+
+    st.markdown("---")
+    st.subheader("💬 Interrogation Assistant")
     for msg in st.session_state["chat_history"]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
