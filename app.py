@@ -361,7 +361,7 @@ TOOL_TAXONOMY = {
 }
 
 # ==========================================
-# 3. EXTRACTION, CHECKSUM & GEMINI
+# 3. EXTRACTION, CHECKSUM & PROCESSING ENGINE
 # ==========================================
 def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     try:
@@ -483,21 +483,14 @@ def trim_manuscript_body(text: str) -> str:
 
 
 def clean_tokens(s: str) -> List[str]:
-    """Normalizes text by removing punctuation, casing, hyphens, and whitespace splits."""
     s = s.lower()
-    # Normalize unicode quotes and dashes
     s = re.sub(r"[\u2018\u2019\u201c\u201d]", "'", s)
     s = re.sub(r"[\u2013\u2014-]", " ", s)
-    # Strip non-alphanumeric characters
     s = re.sub(r"[^a-z0-9\s]", " ", s)
     return s.split()
 
 
 def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.82) -> Tuple[bool, float]:
-    """
-    Checks if a quote exists within source_text using sliding token windows
-    and difflib SequenceMatcher to absorb OCR errors, typos, and line-wrap hyphens.
-    """
     quote_tokens = clean_tokens(quote)
     if not quote_tokens:
         return True, 1.0
@@ -505,7 +498,6 @@ def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.82) -> 
     q_len = len(quote_tokens)
     q_str = " ".join(quote_tokens)
 
-    # 1. Exact canonical substring shortcut
     source_clean = " ".join(clean_tokens(source_text))
     if q_str in source_clean:
         return True, 1.0
@@ -514,15 +506,12 @@ def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.82) -> 
     if not source_tokens:
         return False, 0.0
 
-    # Short quote fallback (under 5 tokens)
     if q_len < 5:
-        # Check token set inclusion
         q_set = set(quote_tokens)
         s_set = set(source_tokens)
         overlap = len(q_set & s_set) / float(len(q_set))
         return (overlap >= threshold), overlap
 
-    # 2. Sliding Window with SequenceMatcher
     best_ratio = 0.0
     step = max(1, int(q_len * 0.35))
     window_sizes = [q_len, int(q_len * 1.15)]
@@ -530,7 +519,6 @@ def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.82) -> 
     for w_size in window_sizes:
         for i in range(0, len(source_tokens) - q_len + 1, step):
             window = " ".join(source_tokens[i : i + w_size])
-            # Quick length gate before running sequence matcher
             if abs(len(window) - len(q_str)) > len(q_str) * 0.4:
                 continue
             ratio = difflib.SequenceMatcher(None, q_str, window).quick_ratio()
@@ -539,17 +527,12 @@ def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.82) -> 
             if best_ratio >= threshold:
                 return True, best_ratio
 
-    # Final detailed check on the best sliding candidate
     return (best_ratio >= threshold), best_ratio
 
 
 def run_python_groundedness_checksum(
     data: dict, full_raw_text: str, fuzzy_threshold: float = 0.82
 ) -> Tuple[dict, float, List[str]]:
-    """
-    Deterministic Python checksum verifying that LLM verbatim quotes are grounded
-    in the document using sliding fuzzy token matching.
-    """
     if not full_raw_text or not full_raw_text.strip():
         return data, 100.0, ["Source text unavailable for verification."]
 
@@ -590,7 +573,7 @@ def run_python_groundedness_checksum(
     return data, grounded_score, warnings
 
 
-def appraise_with_gemini(
+def execute_manuscript_evaluation(
     client: genai.Client,
     text_content: Optional[str] = None,
     raw_pdf_bytes: Optional[bytes] = None,
@@ -673,7 +656,7 @@ def appraise_with_gemini(
             types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf")
         )
         contents.append(
-            f"Perform the critical appraisal for {assigned_design} using vision OCR and return the JSON object."
+            f"Perform the critical appraisal for {assigned_design} and return the JSON object."
         )
     else:
         raise ValueError("No valid manuscript text or PDF bytes supplied.")
@@ -731,7 +714,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
     run_t.font.bold = True
     run_t.font.color.rgb = RGBColor(31, 78, 121)
 
-    p_sub = doc.add_paragraph("Automated critical evidence synthesis evaluated via Google Gemini.")
+    p_sub = doc.add_paragraph("Automated critical evidence synthesis and methodological assessment report.")
     p_sub.runs[0].font.size = Pt(9.5)
     p_sub.runs[0].italic = True
 
@@ -744,7 +727,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
         ("DOI / Reference:", data.get("doi", "N/A")),
         ("Study Architecture:", data.get("study_design", "N/A")),
         ("Gold-Standard Tool Applied:", data.get("appraisal_tool_selected", "N/A")),
-        ("Fuzzy Groundedness Checksum:", f"{data.get('groundedness_score', 100.0)}% Evidence Verified in Source Text"),
+        ("Source Groundedness Verification:", f"{data.get('groundedness_score', 100.0)}% Evidence Verified in Source Text"),
     ]
     for idx, (label, val) in enumerate(fields):
         row = meta_table.rows[idx]
@@ -833,7 +816,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
     for item in data.get("domain_appraisals", []):
         row_cells = table.add_row().cells
 
-        # Col 0: Domain Name + Question Prompt for Context
         p_d = row_cells[0].paragraphs[0]
         r_name = p_d.add_run(f"{item.get('domain_name', '')}\n\n")
         r_name.bold = True
@@ -849,13 +831,11 @@ def build_docx_report(data: dict) -> io.BytesIO:
             r_qt.italic = True
             r_qt.font.size = Pt(8.5)
 
-        # Col 1: Score/Rating
         p_r = row_cells[1].paragraphs[0]
         r_sc = p_r.add_run(item.get("rating", ""))
         r_sc.bold = True
         r_sc.font.size = Pt(10)
 
-        # Col 2: Evidence & Section Location + Checksum verification status
         p_e = row_cells[2].paragraphs[0]
         loc = item.get("location_reference", "Section")
         r_loc = p_e.add_run(f"[{loc}]\n")
@@ -872,7 +852,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
         r_chk.font.size = Pt(7.5)
         r_chk.font.color.rgb = RGBColor(30, 130, 30) if "Verified" in status else RGBColor(180, 40, 40)
 
-        # Col 3: Detailed Critique
         p_c = row_cells[3].paragraphs[0]
         r_crit = p_c.add_run(item.get("critique", ""))
         r_crit.font.size = Pt(9)
@@ -974,7 +953,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
 
 
 def build_pdf_report(data: dict) -> io.BytesIO:
-    """Generates an executive, styled PDF report via ReportLab in pure Python."""
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -1037,11 +1015,9 @@ def build_pdf_report(data: dict) -> io.BytesIO:
 
     story = []
 
-    # Title Banner
     story.append(Paragraph(f"{APP_NAME} — Methodological Evaluation", title_style))
-    story.append(Paragraph("Automated critical evidence synthesis evaluated via Google Gemini.", sub_style))
+    story.append(Paragraph("Automated critical evidence synthesis and methodological assessment report.", sub_style))
 
-    # Bibliographic Metadata Table
     meta_data = [
         [Paragraph("Evaluated Title:", bold_body_style), Paragraph(data.get("paper_title", "N/A"), body_style)],
         [Paragraph("Authors:", bold_body_style), Paragraph(data.get("authors", "Not Specified"), body_style)],
@@ -1062,7 +1038,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_meta)
     story.append(Spacer(1, 10))
 
-    # Visual Quality Meter
     tier = str(data.get("quality_tier", "")).upper()
     if "GREEN" not in tier and "YELLOW" not in tier and "RED" not in tier:
         v = str(data.get("overall_verdict", "")).lower()
@@ -1090,7 +1065,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_gauge)
     story.append(Spacer(1, 10))
 
-    # Domain Appraisal Breakdown
     story.append(Paragraph(f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})", h1_style))
     domain_table_data = [[
         Paragraph("Domain & Prompt Criterion", table_header_style),
@@ -1120,7 +1094,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_domains)
     story.append(Spacer(1, 12))
 
-    # Executive Synthesis & Scorecard Summary
     story.append(Paragraph("2. Methodological Synthesis & Scorecard Summary", h1_style))
     story.append(Paragraph(f"<b>Executive Synthesis:</b> {data.get('overall_synthesis', '')}", body_style))
     story.append(Spacer(1, 8))
@@ -1158,7 +1131,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(Paragraph(f"<b>Final Determination:</b> <font color='#aa2222'><b>{data.get('overall_verdict', 'N/A')}</b></font>", bold_body_style))
     story.append(Spacer(1, 10))
 
-    # Tool Metadata Reference Table
     story.append(Paragraph("3. Appraisal Framework & Standards Appendix", h1_style))
     tool_meta = data.get("tool_meta", {})
     ref_data = [
@@ -1230,15 +1202,15 @@ if "history_limit" not in st.session_state:
     st.session_state["history_limit"] = 10
 
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.header("⚙️ Configuration")
     if not api_key:
         api_key = st.text_input(
-            "Gemini API Key",
+            "Service Access Key",
             type="password",
-            help="Enter your Google AI Studio API key",
+            help="Enter your active validation credential key",
         )
     else:
-        st.success("API Key Active")
+        st.success("Access Credential Verified")
 
     if st.button("Log Out"):
         st.session_state["authenticated"] = False
@@ -1316,7 +1288,7 @@ with tab_pdf:
             )
         else:
             st.warning(
-                "⚠️ PDF appears scanned or image-based. Gemini Native Vision OCR will be used automatically."
+                "⚠️ PDF appears scanned or image-based. System OCR pipeline will be used automatically."
             )
 
 with tab_url:
@@ -1348,34 +1320,33 @@ default_idx = (
 )
 
 selected_design = st.selectbox(
-    "Target Study Architecture (Auto-detected via Python heuristics):",
+    "Target Study Architecture (Auto-detected via pattern heuristics):",
     options=available_designs,
     index=default_idx,
-    help="Python detected this study design based on title, abstract, and methodology keywords. You can manually adjust it if needed."
+    help="Study design detected based on title, abstract, and methodology keywords. You can manually adjust it if needed."
 )
 
 if st.button("⚡ Run Methodological Appraisal", type="primary"):
     if not api_key:
-        st.warning("Please enter your Gemini API key in the sidebar.")
+        st.warning("Please enter your access key in the sidebar.")
     elif not paper_text and not raw_pdf_bytes:
         st.warning("Please upload a PDF or fetch an article URL first.")
     else:
         client = genai.Client(api_key=api_key)
         mode_label = (
-            "Vision OCR"
+            "Vision OCR Pipeline"
             if (raw_pdf_bytes and not paper_text)
-            else "Extracted Text (Trimmed)"
+            else "Extracted Text (Normalized)"
         )
         with st.spinner(f"Evaluating {selected_design} using {mode_label}..."):
             try:
-                raw_data = appraise_with_gemini(
+                raw_data = execute_manuscript_evaluation(
                     client,
                     text_content=paper_text,
                     raw_pdf_bytes=raw_pdf_bytes if not paper_text else None,
                     assigned_design=selected_design,
                 )
                 
-                # Run deterministic fuzzy token-matching checksum
                 verified_data, score, warnings = run_python_groundedness_checksum(
                     raw_data, paper_text, fuzzy_threshold=0.82
                 )
@@ -1424,11 +1395,11 @@ if "appraisal_data" in st.session_state:
         st.metric("Overall Verdict", data.get("overall_verdict"))
     with c4:
         chk_score = data.get("groundedness_score", 100.0)
-        st.metric("Evidence Groundedness", f"{chk_score}%", help="Calculated via local Python SequenceMatcher comparing LLM quotes to raw PDF text.")
+        st.metric("Evidence Groundedness", f"{chk_score}%", help="Calculated via local SequenceMatcher comparing extracted quotes to raw PDF text.")
 
     # Checksum Warning Alert
     if data.get("groundedness_warnings"):
-        with st.expander("⚠️ Python Checksum Warnings (Unverified Citations)"):
+        with st.expander("⚠️ Groundedness Check Warnings (Unverified Citations)"):
             for w in data["groundedness_warnings"]:
                 st.write(f"- {w}")
 
