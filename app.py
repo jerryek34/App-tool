@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -276,16 +277,34 @@ def appraise_with_gemini(
         " object."
     )
 
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            response_mime_type="application/json",
-            temperature=0.1,
-        ),
-    )
-    return json.loads(response.text)
+    candidate_models = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-pro"]
+    last_error = None
+
+    for model_name in candidate_models:
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json",
+                        temperature=0.1,
+                    ),
+                )
+                return json.loads(response.text)
+            except Exception as e:
+                err_str = str(e)
+                last_error = e
+                if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str:
+                    time.sleep(2 * (attempt + 1))
+                    continue
+                elif "404" in err_str or "NOT_FOUND" in err_str:
+                    break
+                else:
+                    raise e
+
+    raise last_error
 
 
 # ==========================================
