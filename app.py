@@ -37,7 +37,6 @@ except ImportError:
 DB_NAME = "appraisals.db"
 APP_NAME = "Kitique Appraisal Tool"
 
-# Free-tier, low-latency, active Google AI Studio models
 FREE_ACTIVE_MODELS = [
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
@@ -300,9 +299,6 @@ def delete_appraisal(appraisal_id: int):
         conn.commit()
 
 
-# ==========================================
-# 2. ROBUST TEXT & URL EXTRACTION
-# ==========================================
 def clean_pdf_artifacts(raw_text: str) -> str:
     cleaned = re.sub(r"(\w+)-\s*\n\s*(\w+)", r"\1\2", raw_text)
     cleaned = re.sub(r"(?i)\bpage\s+\d+\s+(?:of|\/)\s+\d+\b", "", cleaned)
@@ -348,7 +344,6 @@ def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
 
 
 def extract_text_from_url(raw_input: str) -> str:
-    """Normalizes bare DOIs and URLs without HTML injections."""
     target = raw_input.strip()
     if not target.startswith("http://") and not target.startswith("https://"):
         if target.startswith("10.") or "/10." in target:
@@ -367,11 +362,7 @@ def extract_text_from_url(raw_input: str) -> str:
     return article.get_text(separator="\n", strip=True) if article else ""
 
 
-# ==========================================
-# 3. 4-SOURCE RANKED ENSEMBLE CLASSIFIER
-# ==========================================
 def extract_declared_design_ranked(text: str) -> Optional[Tuple[str, str, int]]:
-    """Source 1: Ranked explicit declaration extractor."""
     head = text[:6000].lower()
 
     ranked_definitions = [
@@ -452,7 +443,6 @@ def extract_declared_design_ranked(text: str) -> Optional[Tuple[str, str, int]]:
 
 
 def extract_study_features(text: str) -> dict:
-    """Source 2: Structural feature extraction."""
     head = text[:9000].lower()
 
     is_review = bool(re.search(r"\b(review|systematic\s+review|meta-analysis|literature\s+search|prisma|scoping\s+review)\b", head))
@@ -514,10 +504,6 @@ def classify_from_features(features: dict) -> str:
 
 
 def compute_weighted_keyword_frequencies(text: str) -> str:
-    """
-    Source 3: Positional keyword scoring.
-    Title/Header: 5x | Abstract: 3x | Body: 1x
-    """
     head_title = text[:600].lower()
     abstract_zone = text[600:3000].lower()
     body_zone = text[3000:12000].lower()
@@ -552,7 +538,6 @@ def compute_weighted_keyword_frequencies(text: str) -> str:
 def verify_architecture_with_first_page(
     client: Optional[genai.Client], first_page_text: str, candidate_tools: List[str]
 ) -> str:
-    """Source 4: Zero-shot structural extraction on Page 1."""
     if not client:
         return ""
     tools_str = ", ".join(f"'{t}'" for t in candidate_tools if not t.startswith("🔍"))
@@ -594,27 +579,22 @@ def run_four_source_ensemble(
 ) -> dict:
     evidence_points = []
 
-    # 1. Source 1: Ranked Declared Design
     declared_res = extract_declared_design_ranked(text)
     declared_pred = declared_res[0] if declared_res else None
     if declared_pred:
         evidence_points.append(f"Declared: Author explicitly states '{declared_res[1]}' (Priority Rank: {declared_res[2]})")
 
-    # 2. Source 2: Feature Extractor
     features = extract_study_features(text)
     feature_pred = classify_from_features(features)
     evidence_points.append(f"Features: Primary={features.get('primary_research')}, Cohort={features.get('cohort')}, RCT={features.get('randomized')}")
 
-    # 3. Source 3: Weighted Keyword Scorer
     keyword_pred = compute_weighted_keyword_frequencies(text)
     evidence_points.append(f"Positional Keywords: Highest weighted score points to '{keyword_pred}'")
 
-    # 4. Source 4: LLM Page-1 Verifier
     llm_pred = verify_architecture_with_first_page(client, text, available_designs)
     if llm_pred:
         evidence_points.append(f"Page-1 Verifier: Independent analysis confirmed '{llm_pred}'")
 
-    # --- CALIBRATED OVERRIDE & DISCREPANCY TUNING ---
     if declared_pred:
         if feature_pred == declared_pred:
             assigned_confidence = 0.98
@@ -690,9 +670,6 @@ def detect_classification_contradiction(manuscript_text: str, predicted_design: 
     return None
 
 
-# ==========================================
-# 4. EXECUTION & CHECKSUM ADJUDICATION
-# ==========================================
 def trim_manuscript_body(text: str) -> str:
     lower = text.lower()
     for marker in ["\nreferences\n", "\nbibliography\n", "\nliterature cited\n"]:
@@ -872,6 +849,14 @@ def execute_manuscript_evaluation(
     - Total: 0 to 9 Stars
     - Quality: Good (7-9), Fair (4-6), Poor (0-3).
 
+    STORY-LIKE NARRATIVE ARC SUMMARY (4 TO 10 BULLETS REQUIRED):
+    Provide a compelling, chronological story-like summary of the entire paper and its post-grading appraisal:
+    1. Act I (The Clinical Dilemma & Spark): What unresolved problem or uncertainty prompted this inquiry?
+    2. Act II (The Patient Cohort & Investigative Journey): Who was studied, how were they followed/intervened, and under what conditions?
+    3. Act III (The Empirical Revelations): What did the data actually show regarding the primary endpoints?
+    4. Act IV (The Auditor's Methodological Reality Check): How did the study hold up under our appraisal tool? Highlight key risks of bias, confounding, blinding/attrition caveats, or notable procedural rigour.
+    5. Act V (The Translational Epilogue): What does this mean for clinical practice today? Adopt, adapt, or treat with extreme caution?
+
     CRITICAL: Output ONLY a valid JSON object matching:
     {{
       "paper_title": "Identified full title",
@@ -898,6 +883,13 @@ def execute_manuscript_evaluation(
         "Primary clinical finding or translational headline",
         "Key methodological caveat / risk of bias limitation to consider before clinical adoption",
         "Actionable practice or implementation guideline"
+      ],
+      "narrative_arc_summary": [
+        "Act I — The Clinical Dilemma: [Describe clinical context and question]",
+        "Act II — The Cohort & Journey: [Describe methodology, participants, intervention]",
+        "Act III — The Data Speaks: [Describe findings and statistical endpoints]",
+        "Act IV — The Critical Reality Check: [Appraisal tool post-grading critique and flaws/strengths]",
+        "Act V — The Translational Epilogue: [Final clinical adoption verdict]"
       ],
       "audit_log": {{
         "classification_rationale": "Keywords and structural features identifying this design",
@@ -1026,6 +1018,30 @@ def build_docx_report(data: dict) -> io.BytesIO:
         row.cells[0]._tc.get_or_add_tcPr().append(shd)
         row.cells[0].paragraphs[0].add_run(label).bold = True
         row.cells[1].paragraphs[0].add_run(str(val))
+
+    doc.add_paragraph("")
+
+    # Practical Takeaways
+    takeaways = data.get("practical_takeaways", [])
+    if takeaways:
+        doc.add_heading("Practical Takeaways from the Paper (At-A-Glance)", level=2)
+        for idx, pt in enumerate(takeaways, 1):
+            p_t = doc.add_paragraph(style='List Bullet')
+            p_t.add_run(f"Takeaway #{idx}: ").bold = True
+            p_t.add_run(pt)
+
+    # Narrative Arc Summary
+    story_arc = data.get("narrative_arc_summary", [])
+    if story_arc:
+        doc.add_heading("Narrative Story Arc & Post-Grading Appraisal Journey", level=2)
+        for idx, pt in enumerate(story_arc, 1):
+            p_s = doc.add_paragraph(style='List Number')
+            parts = pt.split(":", 1)
+            if len(parts) == 2:
+                p_s.add_run(parts[0] + ":").bold = True
+                p_s.add_run(parts[1])
+            else:
+                p_s.add_run(pt)
 
     doc.add_paragraph("")
     doc.add_heading(f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})", level=1)
@@ -1224,6 +1240,27 @@ def build_pdf_report(data: dict) -> io.BytesIO:
             ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
         ]))
         story.append(t_takeaways)
+        story.append(Spacer(1, 10))
+
+    story_arc = data.get("narrative_arc_summary", [])
+    if story_arc:
+        story.append(Paragraph("Narrative Story Arc & Post-Grading Appraisal Journey:", h2_style))
+        story_rows = []
+        for idx, point in enumerate(story_arc):
+            story_rows.append([
+                Paragraph(f"<b>Step #{idx + 1}:</b>", bold_style),
+                Paragraph(point, takeaway_style)
+            ])
+        t_story = Table(story_rows, colWidths=[1.8 * inch, 5.6 * inch])
+        t_story.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F7FBF9')),
+            ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#A3D9C9')),
+            ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E1F2ED')),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        story.append(t_story)
         story.append(Spacer(1, 10))
 
     story.append(Paragraph(f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})", h2_style))
@@ -1451,7 +1488,6 @@ with tab_url:
 active_tools = get_all_tools()
 available_designs = list(active_tools.keys()) + ["🔍 Auto-Detect & Discover Tool (If not in list)"]
 
-# --- 4-SOURCE RANKED ENSEMBLE CLASSIFICATION ---
 ensemble_winner = "Observational Study (Cohort)"
 confidence_score = 1.0
 contradiction_flag = None
@@ -1558,6 +1594,25 @@ if "appraisal_data" in st.session_state:
     if nos_stars and "total_stars" in nos_stars and nos_stars["total_stars"] > 0:
         st.info(f"⭐ **Newcastle-Ottawa Scale Star Count:** {nos_stars.get('total_stars', 0)}/9 Stars (Selection: {nos_stars.get('selection_stars', 0)}★ | Comparability: {nos_stars.get('comparability_stars', 0)}★ | Outcome: {nos_stars.get('outcome_stars', 0)}★)")
 
+    # Practical Takeaways
+    takeaways = data.get("practical_takeaways", [])
+    if takeaways:
+        st.markdown("### 💡 Practical Takeaways from the Paper (At-A-Glance)")
+        for idx, item in enumerate(takeaways, 1):
+            st.markdown(f"**{idx}.** {item}")
+
+    # Narrative Story Arc Summary
+    story_arc = data.get("narrative_arc_summary", [])
+    if story_arc:
+        st.markdown("### 📖 Narrative Story Arc & Translational Journey")
+        with st.container():
+            for idx, pt in enumerate(story_arc, 1):
+                parts = pt.split(":", 1)
+                if len(parts) == 2:
+                    st.markdown(f"**{idx}. {parts[0].strip()}:** {parts[1].strip()}")
+                else:
+                    st.markdown(f"**{idx}.** {pt}")
+
     st.subheader("📊 Domain Analysis")
     st.dataframe(
         [
@@ -1618,6 +1673,8 @@ if "appraisal_data" in st.session_state:
                 "ratings_summary": data.get("ratings_summary", {}),
                 "nos_score_breakdown": data.get("nos_score_breakdown", {}),
                 "overall_verdict": data.get("overall_verdict"),
+                "practical_takeaways": data.get("practical_takeaways", []),
+                "narrative_arc_summary": data.get("narrative_arc_summary", []),
                 "audit_log": data.get("audit_log", {}),
                 "checksum_flaws": data.get("checksum_flaws", []),
                 "groundedness_score": data.get("groundedness_score"),
