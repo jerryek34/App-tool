@@ -14,7 +14,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Pt, RGBColor
 from google import genai
 from google.genai import types
 from pypdf import PdfReader
@@ -26,9 +26,6 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 import requests
 import streamlit as st
 
-# ==========================================
-# 1. DATABASE LAYER (SQLite)
-# ==========================================
 DB_NAME = "appraisals.db"
 APP_NAME = "Kitique Appraisal Tool"
 
@@ -43,212 +40,95 @@ SEED_TAXONOMY = {
     "Clinical Practice Guideline / Consensus Statement": {
         "tool": "AGREE II",
         "full_name": "Appraisal of Guidelines for Research & Evaluation II",
-        "purpose": "Assesses the methodological rigour, stakeholder involvement, and clinical transparency of guidelines.",
+        "purpose": "Assesses methodological rigour, stakeholder involvement, and clinical transparency.",
         "domains": [
-            {
-                "name": "Domain 1: Scope and Purpose",
-                "question": "Are the overall objective(s), health question(s) covered, and target population explicitly described?",
-            },
-            {
-                "name": "Domain 2: Stakeholder Involvement",
-                "question": "Does the group include all relevant professional groups, have patient/target population views been sought, and are target users clearly defined?",
-            },
-            {
-                "name": "Domain 3: Rigour of Development",
-                "question": "Were systematic search methods used, criteria for selecting evidence transparent, strengths/limitations explicit, health benefits/risks considered, and is an external review/update protocol documented?",
-            },
-            {
-                "name": "Domain 4: Clarity of Presentation",
-                "question": "Are recommendations specific, unambiguous, identifiable, and presenting different management options clearly?",
-            },
-            {
-                "name": "Domain 5: Applicability",
-                "question": "Does the guideline describe facilitators/barriers to application, advice/tools on execution, resource implications, and monitoring criteria?",
-            },
-            {
-                "name": "Domain 6: Editorial Independence",
-                "question": "Did the funding body influence guideline content, and were competing interests of development group members recorded and addressed?",
-            },
+            {"name": "Domain 1: Scope and Purpose", "question": "Are overall objectives, health questions, and target population explicitly described?"},
+            {"name": "Domain 2: Stakeholder Involvement", "question": "Does the group include relevant professionals and have user/target views been sought?"},
+            {"name": "Domain 3: Rigour of Development", "question": "Were systematic search methods used, criteria explicit, and an update protocol documented?"},
+            {"name": "Domain 4: Clarity of Presentation", "question": "Are recommendations specific, unambiguous, and easily identifiable?"},
+            {"name": "Domain 5: Applicability", "question": "Does it describe facilitators/barriers, execution tools, and monitoring criteria?"},
+            {"name": "Domain 6: Editorial Independence", "question": "Did funding bodies influence content, and were competing interests addressed?"},
         ],
-        "scale": "1 (Strongly Disagree / Absent) to 7 (Strongly Agree / Exemplary). Standard: 1 = No information / poor reporting; 4 = Moderate; 7 = Methodologically flawless. Standardized domain % >= 70% required for high quality.",
+        "scale": "1 (Strongly Disagree / Absent) to 7 (Strongly Agree / Exemplary). Standardized % >= 70% required for high quality.",
     },
     "Randomized Controlled Trial (RCT)": {
         "tool": "Cochrane RoB 2",
         "full_name": "Cochrane Risk of Bias Tool for Randomized Trials (Version 2)",
-        "purpose": "Evaluates internal validity and potential systematic errors in trial design, conduct, and reporting.",
+        "purpose": "Evaluates internal validity and potential systematic errors in trial design and conduct.",
         "domains": [
-            {
-                "name": "Domain 1: Bias arising from the randomization process",
-                "question": "Was the allocation sequence truly random, centralized/concealed until assignment, and were baseline prognostic variables balanced across groups?",
-            },
-            {
-                "name": "Domain 2: Bias due to deviations from intended interventions",
-                "question": "Were participants and caregivers blinded, and was an Intention-to-Treat (ITT) or modified ITT analysis performed to account for non-adherence?",
-            },
-            {
-                "name": "Domain 3: Bias due to missing outcome data",
-                "question": "Were outcome data complete for >95% of randomized participants, or is there evidence that attrition was balanced and non-informative?",
-            },
-            {
-                "name": "Domain 4: Bias in measurement of the outcome",
-                "question": "Was the outcome assessor fully blinded to group assignment, and was the measurement instrument objective and validated?",
-            },
-            {
-                "name": "Domain 5: Bias in selection of the reported result",
-                "question": "Was the trial registered prospectively in a registry (e.g. ClinicalTrials.gov) with an analysis plan finalized prior to unblinded analysis?",
-            },
+            {"name": "Domain 1: Randomization process", "question": "Was allocation random, concealed until assignment, and baseline differences balanced?"},
+            {"name": "Domain 2: Deviations from intended interventions", "question": "Were participants/caregivers blinded, and was an ITT/modified-ITT analysis executed?"},
+            {"name": "Domain 3: Missing outcome data", "question": "Were outcome data complete or is there evidence that attrition was non-informative?"},
+            {"name": "Domain 4: Measurement of the outcome", "question": "Was the outcome assessor fully blinded and measurement instruments validated?"},
+            {"name": "Domain 5: Selection of the reported result", "question": "Was the trial registered prospectively with an analysis plan finalized prior to unblinded analysis?"},
         ],
-        "scale": "Low Risk of Bias | Some Concerns | High Risk of Bias. CRITICAL: A single High Risk domain automatically mandates an overall High Risk rating. A single domain with Some Concerns prevents an overall Low Risk rating.",
+        "scale": "Low Risk | Some Concerns | High Risk. A single High Risk domain mandates an overall High Risk rating.",
     },
     "Non-Randomized Intervention / Quasi-Experimental": {
         "tool": "ROBINS-I",
         "full_name": "Risk Of Bias In Non-randomized Studies - of Interventions",
         "purpose": "Assesses risk of bias in comparative studies comparing intervention groups without true randomization.",
         "domains": [
-            {
-                "name": "Domain 1: Bias due to Confounding",
-                "question": "Did the authors adequately measure and statistically adjust for all critical baseline and time-varying confounders?",
-            },
-            {
-                "name": "Domain 2: Bias in Selection of participants",
-                "question": "Was participant selection into the cohort free from immortal time bias and independent of intervention status/outcome?",
-            },
-            {
-                "name": "Domain 3: Classification of interventions",
-                "question": "Were intervention status and exposure definitions clearly and objectively defined without misclassification?",
-            },
-            {
-                "name": "Domain 4: Deviations from intended interventions",
-                "question": "Were there systematic deviations from intended interventions or co-interventions unbalanced between groups?",
-            },
-            {
-                "name": "Domain 5: Missing data",
-                "question": "Were outcome data complete, or were missing data handled with robust sensitivity/imputation analyses?",
-            },
-            {
-                "name": "Domain 6: Measurement of outcomes",
-                "question": "Were outcome assessors blinded to exposure status, and were outcome measures valid, reliable, and applied equally?",
-            },
-            {
-                "name": "Domain 7: Selection of the reported result",
-                "question": "Are reported results free from selective outcome or analysis reporting based on statistical significance?",
-            },
+            {"name": "Domain 1: Confounding", "question": "Did the study adjust for all critical baseline and time-varying confounders?"},
+            {"name": "Domain 2: Selection of participants", "question": "Was selection into cohort free from immortal time bias and independent of outcomes?"},
+            {"name": "Domain 3: Classification of interventions", "question": "Were interventions clearly defined prospectively without misclassification?"},
+            {"name": "Domain 4: Deviations from intended interventions", "question": "Were there systematic deviations or co-interventions unbalanced between groups?"},
+            {"name": "Domain 5: Missing data", "question": "Were attrition rates documented with sensitivity analyses or imputation?"},
+            {"name": "Domain 6: Measurement of outcomes", "question": "Were outcome assessors blinded to exposure status with validated metrics?"},
+            {"name": "Domain 7: Selection of reported result", "question": "Are published results consistent with pre-registered protocol without selective p-hacking?"},
         ],
-        "scale": "Low Risk | Moderate Risk | Serious Risk | Critical Risk | No Information. A single Critical Risk domain mandates an overall Critical Risk.",
+        "scale": "Low Risk | Moderate Risk | Serious Risk | Critical Risk | No Information.",
     },
     "Systematic Review / Meta-Analysis": {
         "tool": "AMSTAR 2",
         "full_name": "A MeaSurement Tool to Assess systematic Reviews (Version 2)",
-        "purpose": "Critically appraises systematic reviews that evaluate randomized or non-randomized studies of healthcare interventions.",
+        "purpose": "Critically appraises systematic reviews evaluating randomized or non-randomized healthcare studies.",
         "domains": [
-            {
-                "name": "Domain 1: PICO & Protocol Pre-registration (Critical Domain)",
-                "question": "Did the review question and inclusion criteria include components of PICO, and was a protocol established and registered prior to conducting the review?",
-            },
-            {
-                "name": "Domain 2: Comprehensive Literature Search Strategy (Critical Domain)",
-                "question": "Did the authors search >=2 databases, provide full boolean search strings, search trial registries, and review reference lists?",
-            },
-            {
-                "name": "Domain 3: Duplicate Study Selection & Extraction",
-                "question": "Did at least two reviewers independently screen titles, abstracts, and full texts with documented consensus agreement?",
-            },
-            {
-                "name": "Domain 4: Excluded Studies Justification (Critical Domain)",
-                "question": "Did the authors provide a full bibliographic list of potentially relevant excluded studies along with explicit reasons for each exclusion?",
-            },
-            {
-                "name": "Domain 5: Primary Study RoB Assessment (Critical Domain)",
-                "question": "Did the review apply an established, validated risk of bias tool (RoB 2, ROBINS-I) to all included primary studies?",
-            },
-            {
-                "name": "Domain 6: Meta-Analytic Synthesis Appropriateness (Critical Domain)",
-                "question": "If quantitative synthesis was performed, were statistical pooling methods justified and investigated for heterogeneity?",
-            },
-            {
-                "name": "Domain 7: Publication Bias Assessment (Critical Domain)",
-                "question": "Did the authors formally test for small-study effects/publication bias (funnel plots, Egger's test) for comparisons with >=10 studies?",
-            },
-            {
-                "name": "Domain 8: Conflict of Interest & Funding Reporting",
-                "question": "Did the authors report their own funding/COIs AND the funding sources of primary studies included in the review?",
-            },
+            {"name": "Domain 1: PICO & Protocol Pre-registration", "question": "Did review establish PICO and register protocol (e.g. PROSPERO) prior to screening?"},
+            {"name": "Domain 2: Literature Search Strategy", "question": "Did authors search >=2 databases, provide full boolean search strings, and trial registries?"},
+            {"name": "Domain 3: Duplicate Study Selection & Extraction", "question": "Did at least two reviewers independently screen titles, abstracts, and full texts?"},
+            {"name": "Domain 4: Excluded Studies Justification", "question": "Did authors provide full bibliographic list of excluded studies with explicit rationale?"},
+            {"name": "Domain 5: Primary Study RoB Assessment", "question": "Did the review apply established, validated risk of bias tools to included studies?"},
+            {"name": "Domain 6: Meta-Analytic Synthesis Appropriateness", "question": "Were statistical pooling methods justified and statistical heterogeneity investigated?"},
+            {"name": "Domain 7: Publication Bias Assessment", "question": "Did authors formally test for publication bias (funnel plots, Egger's test)?"},
+            {"name": "Domain 8: Conflict of Interest & Funding", "question": "Did authors report their own funding/COIs and funding of primary included studies?"},
         ],
-        "scale": "High Confidence (0-1 non-critical flaw) | Moderate Confidence (>1 non-critical flaw) | Low Confidence (1 critical flaw) | Critically Low Confidence (>1 critical flaw).",
+        "scale": "High Confidence | Moderate Confidence | Low Confidence | Critically Low Confidence.",
     },
     "Observational Study (Cohort or Case-Control)": {
         "tool": "Newcastle-Ottawa Scale (NOS) / CASP",
         "full_name": "Newcastle-Ottawa Quality Assessment Scale / CASP Cohort Tool",
         "purpose": "Evaluates selection, comparability, and exposure/outcome assessment in observational epidemiology.",
         "domains": [
-            {
-                "name": "Domain 1: Selection of Cohorts / Cases",
-                "question": "Are the study cohorts truly representative of community cases, and was exposure ascertained from secure objective records rather than self-report?",
-            },
-            {
-                "name": "Domain 2: Comparability of Groups",
-                "question": "Did the multivariable statistical model control for the primary potential confounder AND additional predefined covariates?",
-            },
-            {
-                "name": "Domain 3: Ascertainment of Exposure and Outcome",
-                "question": "Was outcome assessment blinded or derived from linkage records, with follow-up long enough (>80% retained)?",
-            },
+            {"name": "Domain 1: Selection of Cohorts / Cases", "question": "Are cohorts representative of community cases with exposure ascertained objectively?"},
+            {"name": "Domain 2: Comparability of Groups", "question": "Did multivariable statistical models adjust for primary confounders and key covariates?"},
+            {"name": "Domain 3: Exposure and Outcome Ascertainment", "question": "Was outcome assessment blinded or linkage-derived, with follow-up retention >80%?"},
         ],
-        "scale": "0 to 9 Stars: Good Quality (7-9 stars) | Fair Quality (4-6 stars) | Poor Quality (0-3 stars). Do not award stars without explicit textual evidence.",
+        "scale": "0 to 9 Stars: Good Quality (7-9 stars) | Fair Quality (4-6 stars) | Poor Quality (0-3 stars).",
     },
     "Diagnostic Accuracy Study": {
         "tool": "QUADAS-2",
         "full_name": "Quality Assessment of Diagnostic Accuracy Studies 2",
         "purpose": "Evaluates risk of bias and applicability concerns in primary diagnostic accuracy studies.",
         "domains": [
-            {
-                "name": "Domain 1: Patient Selection",
-                "question": "Was a consecutive or random sample enrolled without case-control sampling or inappropriate exclusions?",
-            },
-            {
-                "name": "Domain 2: Index Test Execution & Interpretation",
-                "question": "Were index test results interpreted completely blinded to the reference standard, with a pre-specified diagnostic cutoff?",
-            },
-            {
-                "name": "Domain 3: Reference Standard Validity",
-                "question": "Is the reference standard the true gold standard, and was it interpreted blinded to the index test result?",
-            },
-            {
-                "name": "Domain 4: Flow and Timing",
-                "question": "Was the time interval between index and reference tests appropriate, and did all patients receive the same reference test?",
-            },
+            {"name": "Domain 1: Patient Selection", "question": "Was a consecutive or random sample enrolled without inappropriate exclusions?"},
+            {"name": "Domain 2: Index Test Execution & Interpretation", "question": "Were index test results interpreted blinded to reference standard with pre-specified cutoffs?"},
+            {"name": "Domain 3: Reference Standard Validity", "question": "Is reference standard true gold-standard and interpreted blinded to index test?"},
+            {"name": "Domain 4: Flow and Timing", "question": "Was time interval appropriate, and did all patients receive verified reference standard?"},
         ],
-        "scale": "Low Risk | High Risk | Unclear Risk. If details are not reported, score as Unclear or High Risk; never assume Low Risk.",
+        "scale": "Low Risk | High Risk | Unclear Risk.",
     },
     "Narrative Review": {
         "tool": "SANRA",
         "full_name": "Scale for the Assessment of Narrative Review Articles",
         "purpose": "Evaluates quality and presentation standard of non-systematic scientific reviews.",
         "domains": [
-            {
-                "name": "Domain 1: Justification of article's importance",
-                "question": "Is the clinical or scientific rationale explicitly justified with background epidemiology?",
-            },
-            {
-                "name": "Domain 2: Statement of concrete aims",
-                "question": "Does the manuscript state explicit questions or testable objective hypotheses?",
-            },
-            {
-                "name": "Domain 3: Description of the literature search",
-                "question": "Are search terms, databases used, and search date restrictions transparently described?",
-            },
-            {
-                "name": "Domain 4: Referencing of primary literature",
-                "question": "Are key claims substantiated by original experimental studies rather than tertiary opinion reviews?",
-            },
-            {
-                "name": "Domain 5: Scientific reasoning and balanced presentation",
-                "question": "Does the review present contradictory findings and neutral debate without author advocacy bias?",
-            },
-            {
-                "name": "Domain 6: Presentation of relevant data",
-                "question": "Are numerical endpoint outcome values, trial sample sizes, and comparative effect estimates synthesized in tables?",
-            },
+            {"name": "Domain 1: Justification of article's importance", "question": "Is clinical/scientific rationale explicitly justified with background epidemiology?"},
+            {"name": "Domain 2: Statement of concrete aims", "question": "Does manuscript state explicit questions or testable objective hypotheses?"},
+            {"name": "Domain 3: Description of literature search", "question": "Are search terms, databases, and date restrictions transparently described?"},
+            {"name": "Domain 4: Referencing of primary literature", "question": "Are key claims substantiated by original experimental studies rather than tertiary opinions?"},
+            {"name": "Domain 5: Scientific reasoning & balance", "question": "Does review present contradictory findings and neutral debate without advocacy bias?"},
+            {"name": "Domain 6: Presentation of relevant data", "question": "Are numerical endpoint values, trial sample sizes, and comparative effect estimates tabulated?"},
         ],
         "scale": "0 = Not Met | 1 = Partially Met | 2 = Met. Total score out of 12 (>=9 required for high quality).",
     },
@@ -257,32 +137,14 @@ SEED_TAXONOMY = {
         "full_name": "Critical Appraisal Skills Programme (CASP) Qualitative Checklist",
         "purpose": "Assesses credibility, dependability, and transferability of qualitative health inquiries.",
         "domains": [
-            {
-                "name": "Domain 1: Research design appropriateness",
-                "question": "Is qualitative inquiry explicitly justified over quantitative measurement for this research question?",
-            },
-            {
-                "name": "Domain 2: Sampling and recruitment strategy",
-                "question": "Was theoretical/purposive sampling described, and were reasons for participant refusal/drop-out explained?",
-            },
-            {
-                "name": "Domain 3: Data collection and reflexivity",
-                "question": "Did the investigators critically evaluate researcher positionality, potential bias, and interaction effects with participants?",
-            },
-            {
-                "name": "Domain 4: Ethical considerations addressed",
-                "question": "Were ethics committee approval, informed consent, and data anonymization explicitly reported?",
-            },
-            {
-                "name": "Domain 5: Rigour and depth of data analysis",
-                "question": "Was thematic saturation verified, and was duplicate independent coding or member checking conducted?",
-            },
-            {
-                "name": "Domain 6: Clear statement of findings and value",
-                "question": "Are emergent themes backed by direct participant quotes with contextualized clinical applicability?",
-            },
+            {"name": "Domain 1: Research design appropriateness", "question": "Is qualitative inquiry justified over quantitative measurement for this research question?"},
+            {"name": "Domain 2: Sampling and recruitment strategy", "question": "Was theoretical/purposive sampling described, and non-participants explained?"},
+            {"name": "Domain 3: Data collection and reflexivity", "question": "Did investigators critically evaluate researcher positionality and potential interaction bias?"},
+            {"name": "Domain 4: Ethical considerations addressed", "question": "Were ethics committee approval, informed consent, and anonymization explicitly reported?"},
+            {"name": "Domain 5: Rigour and depth of data analysis", "question": "Was thematic saturation verified, and was duplicate independent coding conducted?"},
+            {"name": "Domain 6: Clear statement of findings and value", "question": "Are emergent themes backed by direct participant quotes with contextualized clinical value?"},
         ],
-        "scale": "Yes | Can't Tell | No. Standard: 'Can't Tell' or 'No' must be chosen whenever reporting is ambiguous.",
+        "scale": "Yes | Can't Tell | No.",
     },
 }
 
@@ -323,8 +185,7 @@ def get_all_tools() -> Dict[str, dict]:
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT design_name, tool_data FROM custom_tools ORDER BY rowid ASC")
-        rows = cursor.fetchall()
-        return {row["design_name"]: json.loads(row["tool_data"]) for row in rows}
+        return {row["design_name"]: json.loads(row["tool_data"]) for row in cursor.fetchall()}
 
 
 def save_discovered_tool(design_name: str, tool_obj: dict):
@@ -375,13 +236,9 @@ def get_all_appraisals() -> List[Dict]:
 def get_appraisal_by_id(appraisal_id: int) -> Optional[dict]:
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT full_json FROM appraisals WHERE id = ?", (appraisal_id,)
-        )
+        cursor.execute("SELECT full_json FROM appraisals WHERE id = ?", (appraisal_id,))
         row = cursor.fetchone()
-        if row:
-            return json.loads(row["full_json"])
-        return None
+        return json.loads(row["full_json"]) if row else None
 
 
 def delete_appraisal(appraisal_id: int):
@@ -390,9 +247,6 @@ def delete_appraisal(appraisal_id: int):
         conn.commit()
 
 
-# ==========================================
-# 2. EXTRACTION, CHECKSUM & PROCESSING ENGINE
-# ==========================================
 def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -422,106 +276,31 @@ def extract_text_from_url(url: str) -> str:
 
 
 def classify_study_design_heuristically(text: str) -> str:
-    header_text = text[:12000].lower()
+    header_text = text[:10000].lower()
 
-    if any(re.search(p, header_text) for p in [
-        r"clinical\s+practice\s+guideline",
-        r"consensus\s+statement",
-        r"recommendations\s+for\s+clinical\s+practice",
-        r"clinical\s+guideline",
-        r"delphi\s+consensus"
-    ]):
-        return "Clinical Practice Guideline / Consensus Statement"
-
-    if any(re.search(p, header_text) for p in [
-        r"systematic\s+review",
-        r"meta-analysis",
-        r"prisma",
-        r"cochrane\s+database\s+of\s+systematic\s+reviews"
-    ]):
-        return "Systematic Review / Meta-Analysis"
-
-    if any(re.search(p, header_text) for p in [
-        r"randomi[zs]ed\s+controlled\s+trial",
-        r"double-blind",
-        r"placebo-controlled",
-        r"randomly\s+assigned",
-        r"\brct\b"
-    ]):
-        return "Randomized Controlled Trial (RCT)"
-
-    if any(re.search(p, header_text) for p in [
-        r"diagnostic\s+accuracy",
-        r"sensitivity\s+and\s+specificity",
-        r"receiver\s+operating\s+characteristic",
-        r"index\s+test",
-        r"reference\s+standard"
-    ]):
-        return "Diagnostic Accuracy Study"
-
-    if any(re.search(p, header_text) for p in [
-        r"retrospective\s+comparative",
-        r"comparative\s+study",
-        r"comparative\s+observational",
-        r"retrospective\s+(?:cohort|study|review|analysis|audit|case)",
-        r"prospective\s+(?:cohort|study|review|analysis|observational)",
-        r"cohort\s+study",
-        r"case-control",
-        r"cross-sectional",
-        r"observational\s+study",
-        r"longitudinal\s+study",
-        r"prevalence\s+study",
-        r"incidence\s+study"
-    ]):
-        return "Observational Study (Cohort or Case-Control)"
-
-    if any(re.search(p, header_text) for p in [
-        r"qualitative\s+study",
-        r"thematic\s+analysis",
-        r"semi-structured\s+interview",
-        r"focus\s+groups?",
-        r"grounded\s+theory",
-        r"phenomenological"
-    ]):
-        return "Qualitative Study"
-
-    if any(re.search(p, header_text) for p in [
-        r"quasi-experimental",
-        r"non-randomi[zs]ed\s+(?:trial|study|intervention)",
-        r"controlled\s+before-and-after",
-        r"interrupted\s+time\s+series"
-    ]):
-        return "Non-Randomized Intervention / Quasi-Experimental"
-
-    if any(re.search(p, header_text) for p in [
-        r"narrative\s+review",
-        r"scoping\s+review",
-        r"literature\s+review",
-        r"state\s+of\s+the\s+art\s+review"
-    ]):
-        return "Narrative Review"
+    patterns = [
+        (r"clinical\s+practice\s+guideline|consensus\s+statement|delphi\s+consensus", "Clinical Practice Guideline / Consensus Statement"),
+        (r"systematic\s+review|meta-analysis|prisma|cochrane\s+database", "Systematic Review / Meta-Analysis"),
+        (r"randomi[zs]ed\s+controlled\s+trial|double-blind|placebo-controlled|\brct\b", "Randomized Controlled Trial (RCT)"),
+        (r"diagnostic\s+accuracy|sensitivity\s+and\s+specificity|index\s+test", "Diagnostic Accuracy Study"),
+        (r"retrospective|prospective|cohort\s+study|case-control|cross-sectional|observational|comparative\s+study|prevalence", "Observational Study (Cohort or Case-Control)"),
+        (r"qualitative\s+study|thematic\s+analysis|semi-structured\s+interview|grounded\s+theory", "Qualitative Study"),
+        (r"quasi-experimental|non-randomi[zs]ed|controlled\s+before-and-after", "Non-Randomized Intervention / Quasi-Experimental"),
+        (r"narrative\s+review|scoping\s+review|literature\s+review", "Narrative Review"),
+    ]
+    for p, design in patterns:
+        if re.search(p, header_text):
+            return design
 
     return "🔍 Auto-Detect & Discover Tool (If not in list)"
 
 
 def trim_manuscript_body(text: str) -> str:
-    ref_markers = [
-        "\nreferences\n",
-        "\nreferences \n",
-        "\nbibliography\n",
-        "\nliterature cited\n",
-        "\nreferences & notes\n"
-    ]
     lower = text.lower()
-    cut_pos = -1
-    for marker in ref_markers:
+    for marker in ["\nreferences\n", "\nbibliography\n", "\nliterature cited\n"]:
         pos = lower.rfind(marker)
         if pos != -1 and pos > (len(text) * 0.45):
-            cut_pos = pos
-            break
-
-    if cut_pos != -1:
-        return text[:cut_pos]
+            return text[:pos]
     return text
 
 
@@ -540,7 +319,6 @@ def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.82) -> 
 
     q_len = len(quote_tokens)
     q_str = " ".join(quote_tokens)
-
     source_clean = " ".join(clean_tokens(source_text))
     if q_str in source_clean:
         return True, 1.0
@@ -550,25 +328,20 @@ def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.82) -> 
         return False, 0.0
 
     if q_len < 5:
-        q_set = set(quote_tokens)
-        s_set = set(source_tokens)
-        overlap = len(q_set & s_set) / float(len(q_set))
+        overlap = len(set(quote_tokens) & set(source_tokens)) / float(len(set(quote_tokens)))
         return (overlap >= threshold), overlap
 
     best_ratio = 0.0
     step = max(1, int(q_len * 0.35))
-    window_sizes = [q_len, int(q_len * 1.15)]
-
-    for w_size in window_sizes:
-        for i in range(0, len(source_tokens) - q_len + 1, step):
-            window = " ".join(source_tokens[i : i + w_size])
-            if abs(len(window) - len(q_str)) > len(q_str) * 0.4:
-                continue
-            ratio = difflib.SequenceMatcher(None, q_str, window).quick_ratio()
-            if ratio > best_ratio:
-                best_ratio = ratio
-            if best_ratio >= threshold:
-                return True, best_ratio
+    for i in range(0, len(source_tokens) - q_len + 1, step):
+        window = " ".join(source_tokens[i : i + q_len])
+        if abs(len(window) - len(q_str)) > len(q_str) * 0.4:
+            continue
+        ratio = difflib.SequenceMatcher(None, q_str, window).quick_ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+        if best_ratio >= threshold:
+            return True, best_ratio
 
     return (best_ratio >= threshold), best_ratio
 
@@ -580,7 +353,7 @@ def run_comprehensive_checksum(
     flaw_warnings: List[str] = []
 
     if not full_raw_text or not full_raw_text.strip():
-        return data, 100.0, ["Source text unavailable for verification."], ["Cannot verify integrity without source text."]
+        return data, 100.0, ["Source text unavailable."], ["Cannot verify integrity without source text."]
 
     domains = data.get("domain_appraisals", [])
     if not domains:
@@ -589,60 +362,25 @@ def run_comprehensive_checksum(
     verified_count = 0
     for d in domains:
         quote = d.get("verbatim_evidence", "").strip()
-        if not quote or quote.lower() in [
-            "not reported",
-            "none",
-            "n/a",
-            "not specified",
-            "unclear",
-        ]:
+        if not quote or quote.lower() in ["not reported", "none", "n/a", "not specified", "unclear"]:
             d["checksum_status"] = "Verified (Not Applicable)"
             verified_count += 1
             continue
 
         is_match, ratio = fuzzy_quote_match(quote, full_raw_text, threshold=fuzzy_threshold)
-
         if is_match:
             d["checksum_status"] = f"Verified Grounded ({int(ratio * 100)}% Match)"
             verified_count += 1
         else:
             d["checksum_status"] = f"Unverified Grounding ({int(ratio * 100)}% Max Similarity)"
-            grounding_warnings.append(
-                f"Quote in '{d.get('domain_name')}' matched at only {int(ratio * 100)}% against document text (threshold: {int(fuzzy_threshold * 100)}%)."
-            )
+            grounding_warnings.append(f"Quote in '{d.get('domain_name')}' matched at {int(ratio * 100)}%.")
 
     grounded_score = round((verified_count / len(domains)) * 100, 1)
-
     tier = str(data.get("quality_tier", "")).upper()
-    overall_verdict = str(data.get("overall_verdict", "")).lower()
+    has_high_risk = any("high" in str(d.get("rating", "")).lower() or "critical" in str(d.get("rating", "")).lower() for d in domains)
 
-    has_high_risk_domain = False
-    for d in domains:
-        rating_str = str(d.get("rating", "")).lower()
-        if any(term in rating_str for term in [
-            "high risk", "serious risk", "critical risk", "critically low", 
-            "score 0", "score 1", "score 2/7", "score 1/7", "poor quality"
-        ]):
-            has_high_risk_domain = True
-            break
-
-    if "GREEN" in tier and has_high_risk_domain:
-        flaw_warnings.append(
-            "Methodological Contradiction: Overall Tier assigned as 'GREEN' (Robust), but at least one domain contains a critical/high risk judgment."
-        )
-
-    if any(good in overall_verdict for good in ["low risk", "recommended", "high quality", "high confidence"]) and has_high_risk_domain:
-        flaw_warnings.append(
-            "Verdict Conflict: Overall verdict states Low Risk/High Quality despite identified high-risk domain deficiencies."
-        )
-
-    empty_evidence_domains = [
-        d.get("domain_name") for d in domains if not str(d.get("verbatim_evidence", "")).strip()
-    ]
-    if empty_evidence_domains:
-        flaw_warnings.append(
-            f"Evidence Gap: Missing verbatim citations in: {', '.join(empty_evidence_domains[:3])}."
-        )
+    if "GREEN" in tier and has_high_risk:
+        flaw_warnings.append("Methodological Contradiction: Green tier assigned despite high-risk domain.")
 
     data["groundedness_score"] = grounded_score
     data["groundedness_warnings"] = grounding_warnings
@@ -666,11 +404,8 @@ def format_harvard_filename(data: dict, extension: str) -> str:
         has_multiple = any(marker in raw_authors.lower() for marker in ["et al", " and ", "&", ","])
         first_segment = re.split(r"[,;&]|\sand\s|\set\sal", raw_authors, flags=re.IGNORECASE)[0].strip()
         tokens = [t for t in re.split(r"\s+", first_segment) if re.search(r"[a-zA-Z]", t)]
-        if tokens:
-            surname = tokens[-1] if (len(tokens) > 1 and len(tokens[0]) <= 2) else tokens[0]
-            surname = re.sub(r"[^a-zA-Z0-9]", "", surname)
-        else:
-            surname = "Author"
+        surname = tokens[-1] if (len(tokens) > 1 and len(tokens[0]) <= 2) else (tokens[0] if tokens else "Author")
+        surname = re.sub(r"[^a-zA-Z0-9]", "", surname)
         author_part = f"{surname}_et_al" if has_multiple else surname
 
     clean_tool = re.sub(r"[^a-zA-Z0-9_-]", "_", tool)
@@ -679,37 +414,23 @@ def format_harvard_filename(data: dict, extension: str) -> str:
     return re.sub(r"_+", "_", clean_filename)
 
 
-# ==========================================
-# 3. DISCOVERY & EXECUTION ENGINES
-# ==========================================
 def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str, dict]:
     discovery_instruction = """
-    You are an expert academic epidemiologist and research methodologist.
-    Examine the provided text from a research manuscript.
-    1. Determine the EXACT epidemiological/clinical study architecture (e.g. Case Report, Cross-Sectional Survey, Health Economic Evaluation, Animal Model Study, Diagnostic Study, Scoping Review, Retrospective Comparative Cohort, etc.).
-    2. Identify the INTERNATIONALLY RECOGNIZED gold-standard critical appraisal instrument designed specifically for this architecture (e.g., Joanna Briggs Institute [JBI] Critical Appraisal Checklists, CARE Guidelines, STROBE, CHEERS, QUADAS-2, AMSTAR 2, RoB 2, NOS, etc.).
-    3. Construct a complete appraisal taxonomy including tool acronym, full name, clinical purpose, standard scoring scale, and 4 to 8 explicit methodological appraisal domains with direct criterion evaluation questions.
-
-    CRITICAL: Output ONLY a JSON object matching this structure:
+    Examine research text and return JSON:
     {
-      "design_name": "Standardized Study Architecture Name",
+      "design_name": "Study Architecture Name",
       "tool_taxonomy": {
         "tool": "Tool Acronym",
         "full_name": "Full Tool Name",
         "purpose": "Precise methodological purpose",
-        "domains": [
-          {
-            "name": "Domain 1: Title",
-            "question": "Explicit criterion question to evaluate"
-          }
-        ],
-        "scale": "Full explanation of scoring thresholds and rating scale"
+        "domains": [{"name": "Domain Title", "question": "Criterion question"}],
+        "scale": "Scoring thresholds and rules"
       }
     }
     """
     response = client.models.generate_content(
         model="gemini-3.5-flash-lite",
-        contents=[f"MANUSCRIPT EXCERPT:\n{text_sample[:10000]}\n\nIdentify study architecture and gold-standard appraisal tool."],
+        contents=[f"MANUSCRIPT EXCERPT:\n{text_sample[:8000]}\n\nIdentify study architecture and gold-standard appraisal tool."],
         config=types.GenerateContentConfig(
             system_instruction=discovery_instruction,
             response_mime_type="application/json",
@@ -726,121 +447,64 @@ def execute_manuscript_evaluation(
     raw_pdf_bytes: Optional[bytes] = None,
     assigned_design: Optional[str] = None,
     active_tools_map: Optional[dict] = None,
-    strictness_mode: str = "Strict (Zero Benefit of Doubt)",
+    strictness_mode: str = "Strict",
 ) -> dict:
-    if assigned_design and active_tools_map and assigned_design in active_tools_map:
-        active_tool_taxonomy = {assigned_design: active_tools_map[assigned_design]}
-    else:
-        active_tool_taxonomy = active_tools_map if active_tools_map else SEED_TAXONOMY
-
+    active_tool_taxonomy = {assigned_design: active_tools_map[assigned_design]} if (assigned_design and active_tools_map and assigned_design in active_tools_map) else (active_tools_map or SEED_TAXONOMY)
     taxonomy_json = json.dumps(active_tool_taxonomy, indent=2)
 
     system_instruction = f"""
-    You are an unyielding, rigorous epidemiological auditor and methodological quality adjudicator.
-    You evaluate research manuscripts with ZERO benefit of the doubt.
-    STRICT COMPLIANCE MANDATE: You must apply the exact methodological standards dictated by each appraisal framework.
-
-    Appraisal Framework & Rubrics:
+    You are an unyielding epidemiological auditor. Apply zero benefit of doubt.
+    Appraisal Framework:
     {taxonomy_json}
 
-    OPERATIONAL AUDIT RULES:
-    1. THE ABSENCE OF REPORTING IS THE PRESENCE OF BIAS:
-       - If authors fail to explicitly report methodological safeguards (e.g. allocation concealment, blinding, confounder adjustment, prospective registration), assume it was NOT performed.
-       - NEVER assume good clinical or research practice occurred unless substantiated word-for-word in the text.
-    2. SCORING INTEGRITY:
-       - Do NOT be polite, generous, or lenient. Apply the exact scoring scale specified for the assigned tool.
-    3. MANDATORY GROUNDED EVIDENCE:
-       - For every single domain, provide the EXACT verbatim quote extracted directly from the paper.
-       - If an item was NOT reported in the manuscript, explicitly state 'Not reported in text' as verbatim evidence, provide the section searched, and penalize the score accordingly.
-    4. QUALITY TIER DETERMINATION:
-       - "GREEN": Truly robust, low risk across ALL primary domains, prospective registration confirmed, comprehensive reporting.
-       - "YELLOW": Moderate quality, some concerns, or minor reporting limitations without fatal structural bias.
-       - "RED": High risk of bias, critical methodological flaws, lack of registration, unadjusted confounding, or fatal attrition.
+    RULES:
+    1. ABSENCE OF REPORTING IS PRESENCE OF BIAS.
+    2. Extract exact verbatim evidence quotes for every single domain.
+    3. Return quality_tier strictly as 'GREEN', 'YELLOW', or 'RED'.
 
-    Audit Strictness Level: {strictness_mode.upper()}
-
-    CRITICAL: Output ONLY a valid JSON object matching this schema:
+    CRITICAL: Output ONLY a valid JSON object matching:
     {{
       "paper_title": "Identified full title",
-      "authors": "First Author et al. or full author list",
+      "authors": "Author list",
       "journal": "Journal Name",
       "year_published": "YYYY",
       "doi": "DOI or URL",
-      "study_design": "{assigned_design if assigned_design else 'Identified design'}",
-      "appraisal_tool_selected": "Name of appraisal tool",
+      "study_design": "{assigned_design or 'Identified design'}",
+      "appraisal_tool_selected": "Tool name",
       "quality_tier": "GREEN / YELLOW / RED",
-      "overall_verdict": "Low Risk / Moderate Risk / High Risk / Recommended / etc.",
-      "overall_synthesis": "Rigorous narrative detailing specific methodological vulnerabilities and risk of bias.",
-      "tool_meta": {{
-        "acronym": "Tool Acronym",
-        "full_name": "Full Tool Name",
-        "purpose": "Clinical/methodological purpose of the tool",
-        "scoring_rules": "Detailed explanation of scores, thresholds, or stars required"
-      }},
+      "overall_verdict": "Low / Moderate / High Risk",
+      "overall_synthesis": "Methodological critique",
+      "tool_meta": {{"acronym": "Tool", "full_name": "Full Name", "purpose": "Purpose", "scoring_rules": "Rules"}},
       "domain_appraisals": [
-        {{
-          "domain_name": "Domain name as per taxonomy",
-          "evaluation_question": "The appraisal question evaluated",
-          "rating": "Score or Rating",
-          "location_reference": "Section or Page number reference",
-          "verbatim_evidence": "Direct quote from text or 'Not reported in text'",
-          "critique": "Uncompromising analytical rationale justifying why the score was penalized or awarded"
-        }}
+        {{"domain_name": "Title", "evaluation_question": "Question", "rating": "Rating", "location_reference": "Section/Page", "verbatim_evidence": "Quote", "critique": "Critique"}}
       ]
     }}
     """
 
     clean_text = trim_manuscript_body(text_content) if text_content else ""
-
-    contents = []
-    if clean_text and len(clean_text.strip()) > 150:
-        contents.append(
-            f"PAPER CONTENT:\n{clean_text}\n\nExecute the rigorous critical appraisal without benefit of doubt and return the JSON object."
-        )
-    elif raw_pdf_bytes:
-        contents.append(
-            types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf")
-        )
-        contents.append(
-            f"Execute the rigorous critical appraisal for {assigned_design} without benefit of doubt and return the JSON object."
-        )
-    else:
+    contents = [f"PAPER CONTENT:\n{clean_text}\n\nExecute appraisal and return JSON."] if (clean_text and len(clean_text.strip()) > 150) else (
+        [types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf"), f"Appraise for {assigned_design}."] if raw_pdf_bytes else None
+    )
+    if not contents:
         raise ValueError("No valid manuscript text or PDF bytes supplied.")
 
-    candidate_models = [
-        "gemini-3.5-flash-lite",
-        "gemini-2.5-flash-lite",
-        "gemini-3.8-flash",
-        "gemini-2.0-flash",
-    ]
+    for model_name in ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-3.8-flash", "gemini-2.0-flash"]:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                    temperature=0.0,
+                ),
+            )
+            return json.loads(response.text)
+        except Exception:
+            time.sleep(1.0)
+            continue
 
-    last_error = None
-
-    for model_name in candidate_models:
-        for attempt in range(2):
-            try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=contents,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json",
-                        temperature=0.0,
-                    ),
-                )
-                return json.loads(response.text)
-            except Exception as e:
-                err_str = str(e)
-                last_error = e
-                if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str:
-                    time.sleep(1.5)
-                    continue
-                elif "404" in err_str or "NOT_FOUND" in err_str:
-                    break
-                else:
-                    raise e
-
-    raise last_error
+    raise RuntimeError("Appraisal pipeline exceeded retry threshold.")
 
 
 def answer_interrogation_query(
@@ -850,65 +514,36 @@ def answer_interrogation_query(
     raw_manuscript_text: str,
     chat_history: List[dict]
 ) -> str:
-    """Answers auditor questions about the appraisal report and manuscript text."""
     history_context = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in chat_history[-6:]])
-    
     chat_instruction = f"""
     You are an objective methodological audit assistant.
-    The user is interrogating the critical appraisal report and the source manuscript.
-    
-    YOUR OBJECTIVES:
-    1. Answer queries directly, citing specific sections, page locations, and verbatim quotes.
-    2. If the user asks whether a score is justified, cite the evidence from the manuscript and the appraisal rubric.
-    3. If the user points out a potential error or missed text, cross-examine the manuscript excerpt and state clearly whether the appraisal appears correct or if a discrepancy exists.
-    4. Maintain an objective, neutral tone. Do NOT mention any external AI models, system brands, or background technology.
-    
-    APPRAISAL REPORT JSON:
+    Answer user queries regarding the appraisal report and source manuscript.
+    Cite specific lines, sections, and quotes. Do not mention external technology.
+
+    APPRAISAL JSON:
     {json.dumps(appraisal_json, indent=1)}
-    
-    SOURCE MANUSCRIPT TEXT:
-    {raw_manuscript_text[:25000]}
+
+    SOURCE TEXT:
+    {raw_manuscript_text[:20000]}
     """
-    
-    prompt = f"PRIOR CONVERSATION:\n{history_context}\n\nUSER QUESTION: {query}\n\nProvide a clear, evidence-based response."
-    
     response = client.models.generate_content(
         model="gemini-3.5-flash-lite",
-        contents=[prompt],
-        config=types.GenerateContentConfig(
-            system_instruction=chat_instruction,
-            temperature=0.1,
-        )
+        contents=[f"HISTORY:\n{history_context}\n\nUSER QUESTION: {query}"],
+        config=types.GenerateContentConfig(system_instruction=chat_instruction, temperature=0.1)
     )
     return response.text
 
 
-# ==========================================
-# 4. WORD (.docx) & PDF EXPORT ENGINES
-# ==========================================
-def set_cell_background(cell, fill_hex: str):
-    shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
-    cell._tc.get_or_add_tcPr().append(shd)
-
-
 def build_docx_report(data: dict) -> io.BytesIO:
     doc = Document()
-
     title = doc.add_heading(level=0)
     run_t = title.add_run(f"{APP_NAME} — Methodological Evaluation")
     run_t.font.size = Pt(20)
     run_t.font.bold = True
-    run_t.font.color.rgb = RGBColor(31, 78, 121)
+    run_t.font.color.rgb = RGBColor(120, 187, 166)
 
-    p_sub = doc.add_paragraph("Automated critical evidence synthesis and methodological assessment report.")
-    p_sub.runs[0].font.size = Pt(9.5)
-    p_sub.runs[0].italic = True
-
-    meta_table = doc.add_table(rows=8, cols=2)
+    meta_table = doc.add_table(rows=7, cols=2)
     meta_table.style = "Table Grid"
-    
-    chk_status_text = "PASSED (Zero Critical Flaws)" if data.get("checksum_passed", True) else "REVIEW REQUIRED (Flaws Detected)"
-    
     fields = [
         ("Evaluated Title:", data.get("paper_title", "N/A")),
         ("Authors:", data.get("authors", "Not Specified")),
@@ -916,238 +551,38 @@ def build_docx_report(data: dict) -> io.BytesIO:
         ("DOI / Reference:", data.get("doi", "N/A")),
         ("Study Architecture:", data.get("study_design", "N/A")),
         ("Gold-Standard Tool Applied:", data.get("appraisal_tool_selected", "N/A")),
-        ("Evidence Groundedness:", f"{data.get('groundedness_score', 100.0)}% Grounded in Source Text"),
-        ("Methodological Checksum:", chk_status_text),
+        ("Evidence Groundedness:", f"{data.get('groundedness_score', 100.0)}%"),
     ]
     for idx, (label, val) in enumerate(fields):
         row = meta_table.rows[idx]
-        set_cell_background(row.cells[0], "F2F5F8")
-        p0 = row.cells[0].paragraphs[0]
-        r0 = p0.add_run(label)
-        r0.bold = True
-        r0.font.size = Pt(9.5)
-        p1 = row.cells[1].paragraphs[0]
-        r1 = p1.add_run(str(val))
-        r1.font.size = Pt(9.5)
-        if idx == 6:
-            r1.bold = True
-            r1.font.color.rgb = RGBColor(40, 120, 40) if data.get('groundedness_score', 100.0) >= 80 else RGBColor(180, 40, 40)
-        elif idx == 7:
-            r1.bold = True
-            r1.font.color.rgb = RGBColor(40, 120, 40) if data.get("checksum_passed", True) else RGBColor(180, 40, 40)
+        shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="EBF5F2"/>')
+        row.cells[0]._tc.get_or_add_tcPr().append(shd)
+        row.cells[0].paragraphs[0].add_run(label).bold = True
+        row.cells[1].paragraphs[0].add_run(str(val))
 
     doc.add_paragraph("")
-
-    tier = str(data.get("quality_tier", "")).upper()
-    if "GREEN" not in tier and "YELLOW" not in tier and "RED" not in tier:
-        v = str(data.get("overall_verdict", "")).lower()
-        tier = "GREEN" if any(w in v for w in ["low", "high confidence", "recommended", "good"]) else ("YELLOW" if any(w in v for w in ["some", "moderate"]) else "RED")
-
-    p_gauge_label = doc.add_paragraph()
-    r_gl = p_gauge_label.add_run("Methodological Rigour & Clinical Trustworthiness Gauge (At-A-Glance):")
-    r_gl.bold = True
-    r_gl.font.size = Pt(10.5)
-
-    bar_table = doc.add_table(rows=1, cols=3)
-    bar_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-
-    cols_spec = [
-        ("RED", "C00000", "F2D7D5", "HIGH RISK / FLAWED\n(Limited Reliability)"),
-        ("YELLOW", "D4AC0D", "FCF3CF", "MODERATE / SOME CONCERNS\n(Conditional Validity)"),
-        ("GREEN", "229954", "D5F5E3", "ROBUST / LOW RISK\n(Strong Clinical Validity)"),
-    ]
-
-    for i, (b_tier, active_hex, inactive_hex, label) in enumerate(cols_spec):
-        cell = bar_table.rows[0].cells[i]
-        is_active = (b_tier == tier)
-        fill_hex = active_hex if is_active else inactive_hex
-        set_cell_background(cell, fill_hex)
-        p = cell.paragraphs[0]
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
-        display_label = f"✓ {label}" if is_active else label
-        run = p.add_run(display_label)
-        run.bold = is_active
-        run.font.size = Pt(8.5)
-        run.font.color.rgb = RGBColor(255, 255, 255) if is_active else RGBColor(100, 100, 100)
-        
-        if is_active:
-            p_ind = cell.add_paragraph()
-            p_ind.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            r_ind = p_ind.add_run("▲ [ ✓ ASSIGNED TIER ] ▲")
-            r_ind.bold = True
-            r_ind.font.size = Pt(8.5)
-            r_ind.font.color.rgb = RGBColor(255, 255, 255)
-
-    doc.add_paragraph("")
-
-    flaws = data.get("checksum_flaws", [])
-    if flaws:
-        doc.add_heading("⚠️ Methodological Checksum & Integrity Audit", level=2)
-        for f in flaws:
-            p_flaw = doc.add_paragraph(style='List Bullet')
-            r_f = p_flaw.add_run(f)
-            r_f.font.size = Pt(9.5)
-            r_f.font.color.rgb = RGBColor(170, 30, 30)
-        doc.add_paragraph("")
-
-    doc.add_heading(
-        f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})",
-        level=1,
-    )
-    p_lead = doc.add_paragraph(
-        "Each domain is evaluated below against its standard methodological criterion, presenting the appraisal prompt question, assigned score, grounded textual evidence, and evaluative critique."
-    )
-    p_lead.runs[0].font.size = Pt(9.5)
-
+    doc.add_heading(f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})", level=1)
     table = doc.add_table(rows=1, cols=4)
     table.style = "Table Grid"
-    headers = [
-        "Domain & Appraisal Criterion Question",
-        "Appraisal Score",
-        "Grounded Verbatim Evidence & Citation",
-        "Methodological Critique & Rationale",
-    ]
-    for i, title_text in enumerate(headers):
+    for i, h in enumerate(["Domain & Criterion", "Score", "Evidence", "Critique"]):
         cell = table.rows[0].cells[i]
-        set_cell_background(cell, "1F4E79")
-        p = cell.paragraphs[0]
-        r = p.add_run(title_text)
+        shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="78BBA6"/>')
+        cell._tc.get_or_add_tcPr().append(shd)
+        r = cell.paragraphs[0].add_run(h)
         r.bold = True
-        r.font.size = Pt(9.5)
         r.font.color.rgb = RGBColor(255, 255, 255)
 
     for item in data.get("domain_appraisals", []):
         row_cells = table.add_row().cells
-
-        p_d = row_cells[0].paragraphs[0]
-        r_name = p_d.add_run(f"{item.get('domain_name', '')}\n\n")
-        r_name.bold = True
-        r_name.font.size = Pt(9.5)
-
-        q_text = item.get("evaluation_question", "").strip()
-        if q_text:
-            r_ql = p_d.add_run("Appraisal Criterion Question:\n")
-            r_ql.bold = True
-            r_ql.font.size = Pt(8.5)
-            r_ql.font.color.rgb = RGBColor(80, 80, 80)
-            r_qt = p_d.add_run(f'"{q_text}"')
-            r_qt.italic = True
-            r_qt.font.size = Pt(8.5)
-
-        p_r = row_cells[1].paragraphs[0]
-        r_sc = p_r.add_run(item.get("rating", ""))
-        r_sc.bold = True
-        r_sc.font.size = Pt(10)
-
-        p_e = row_cells[2].paragraphs[0]
-        loc = item.get("location_reference", "Section")
-        r_loc = p_e.add_run(f"[{loc}]\n")
-        r_loc.bold = True
-        r_loc.font.size = Pt(8)
-        r_loc.font.color.rgb = RGBColor(90, 90, 90)
-        r_q = p_e.add_run(f'"{item.get("verbatim_evidence", "")}"\n\n')
-        r_q.italic = True
-        r_q.font.size = Pt(8.5)
-        
-        status = item.get("checksum_status", "Verified Grounded")
-        r_chk = p_e.add_run(f"✓ {status}" if "Verified" in status else f"⚠️ {status}")
-        r_chk.bold = True
-        r_chk.font.size = Pt(7.5)
-        r_chk.font.color.rgb = RGBColor(30, 130, 30) if "Verified" in status else RGBColor(180, 40, 40)
-
-        p_c = row_cells[3].paragraphs[0]
-        r_crit = p_c.add_run(item.get("critique", ""))
-        r_crit.font.size = Pt(9)
+        row_cells[0].paragraphs[0].add_run(f"{item.get('domain_name')}\n\n\"{item.get('evaluation_question')}\"")
+        row_cells[1].paragraphs[0].add_run(str(item.get("rating")))
+        row_cells[2].paragraphs[0].add_run(f"[{item.get('location_reference')}]\n\"{item.get('verbatim_evidence')}\"")
+        row_cells[3].paragraphs[0].add_run(str(item.get("critique")))
 
     doc.add_paragraph("")
+    doc.add_heading("2. Executive Synthesis", level=1)
+    doc.add_paragraph(data.get("overall_synthesis", ""))
 
-    doc.add_heading("2. Summary of Findings & Final Scorecard", level=1)
-
-    doc.add_heading("Overall Methodological Synthesis", level=2)
-    p_syn = doc.add_paragraph(data.get("overall_synthesis", ""))
-    p_syn.paragraph_format.line_spacing = 1.15
-    p_syn.runs[0].font.size = Pt(10)
-
-    doc.add_heading("Final Scorecard Summary", level=2)
-    score_table = doc.add_table(rows=1, cols=3)
-    score_table.style = "Table Grid"
-
-    score_headers = ["Domain / Methodological Item", "Rating / Assigned Score", "Status"]
-    for i, title_text in enumerate(score_headers):
-        cell = score_table.rows[0].cells[i]
-        set_cell_background(cell, "333F48")
-        p = cell.paragraphs[0]
-        r = p.add_run(title_text)
-        r.bold = True
-        r.font.size = Pt(9)
-        r.font.color.rgb = RGBColor(255, 255, 255)
-
-    for item in data.get("domain_appraisals", []):
-        r_cells = score_table.add_row().cells
-        r_cells[0].paragraphs[0].add_run(item.get("domain_name", "")).font.size = Pt(9)
-        r_score = r_cells[1].paragraphs[0].add_run(item.get("rating", ""))
-        r_score.bold = True
-        r_score.font.size = Pt(9)
-
-        rating_str = str(item.get("rating", "")).lower()
-        if any(w in rating_str for w in ["low", "yes", "6", "7", "adequate", "2"]):
-            badge = "Satisfactory"
-        elif any(w in rating_str for w in ["some", "moderate", "partial", "4", "5", "1"]):
-            badge = "Minor / Moderate Concern"
-        else:
-            badge = "High Concern / Deficit"
-        r_cells[2].paragraphs[0].add_run(badge).font.size = Pt(8.5)
-
-    doc.add_paragraph("")
-    p_verdict = doc.add_paragraph()
-    r_vlabel = p_verdict.add_run("Final Quality Determination: ")
-    r_vlabel.bold = True
-    r_vlabel.font.size = Pt(11)
-    r_vval = p_verdict.add_run(data.get("overall_verdict", "N/A"))
-    r_vval.bold = True
-    r_vval.font.size = Pt(11)
-    r_vval.font.color.rgb = RGBColor(170, 30, 30)
-
-    doc.add_paragraph("")
-
-    doc.add_heading("3. Standard Reference, Tool Abbreviation & Scoring Scales", level=1)
-    
-    tool_meta = data.get("tool_meta", {})
-    acronym = tool_meta.get("acronym") or data.get("appraisal_tool_selected", "Tool")
-    full_name = tool_meta.get("full_name") or "Standard Critical Appraisal Instrument"
-    purpose = tool_meta.get("purpose") or "Standardized epidemiological instrument used to assess bias and study rigour."
-    scoring_rules = tool_meta.get("scoring_rules") or "Standard qualitative rating or numerical score threshold."
-
-    design_match = SEED_TAXONOMY.get(data.get("study_design", ""))
-    if design_match:
-        if not full_name or full_name == "Standard Critical Appraisal Instrument":
-            full_name = design_match.get("full_name", full_name)
-        if not purpose or "Standardized epidemiological" in purpose:
-            purpose = design_match.get("purpose", purpose)
-        if not scoring_rules or "Standard qualitative" in scoring_rules:
-            scoring_rules = design_match.get("scale", scoring_rules)
-
-    app_table = doc.add_table(rows=4, cols=2)
-    app_table.style = "Table Grid"
-    app_entries = [
-        ("Tool & Abbreviation:", f"{acronym} — {full_name}"),
-        ("Instrument Purpose:", purpose),
-        ("Scoring Metric & Scales:", scoring_rules),
-        ("Interpretation Guide:", "Evidence appraised using this framework should be balanced against clinical relevance and the patient population. Low risk of bias or high score thresholds indicate strong internal validity, while high risk domains warrant caution before clinical translation."),
-    ]
-    for idx, (label, val) in enumerate(app_entries):
-        row = app_table.rows[idx]
-        set_cell_background(row.cells[0], "F2F5F8")
-        p0 = row.cells[0].paragraphs[0]
-        r0 = p0.add_run(label)
-        r0.bold = True
-        r0.font.size = Pt(9.5)
-        p1 = row.cells[1].paragraphs[0]
-        r1 = p1.add_run(val)
-        r1.font.size = Pt(9.5)
-
-    doc.add_paragraph("")
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
@@ -1156,180 +591,49 @@ def build_docx_report(data: dict) -> io.BytesIO:
 
 def build_pdf_report(data: dict) -> io.BytesIO:
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buf,
-        pagesize=letter,
-        rightMargin=36,
-        leftMargin=36,
-        topMargin=36,
-        bottomMargin=36
-    )
-
+    doc = SimpleDocTemplate(buf, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "DocTitle",
-        parent=styles["Heading1"],
-        fontSize=18,
-        leading=22,
-        textColor=colors.HexColor("#1F4E79"),
-        fontName="Helvetica-Bold",
-        spaceAfter=4,
-    )
-    sub_style = ParagraphStyle(
-        "DocSub",
-        parent=styles["Normal"],
-        fontSize=8.5,
-        leading=11,
-        textColor=colors.HexColor("#555555"),
-        fontName="Helvetica-Oblique",
-        spaceAfter=12,
-    )
-    h1_style = ParagraphStyle(
-        "H1",
-        parent=styles["Heading2"],
-        fontSize=12,
-        leading=16,
-        textColor=colors.HexColor("#1F4E79"),
-        fontName="Helvetica-Bold",
-        spaceBefore=12,
-        spaceAfter=6,
-    )
-    body_style = ParagraphStyle(
-        "Body",
-        parent=styles["Normal"],
-        fontSize=8.5,
-        leading=11.5,
-        fontName="Helvetica",
-    )
-    bold_body_style = ParagraphStyle(
-        "BoldBody",
-        parent=body_style,
-        fontName="Helvetica-Bold",
-    )
-    table_header_style = ParagraphStyle(
-        "TableHeader",
-        parent=body_style,
-        fontName="Helvetica-Bold",
-        textColor=colors.white,
-        fontSize=8.5,
-        leading=11,
-    )
 
-    story = []
+    title_style = ParagraphStyle("T", parent=styles["Heading1"], fontSize=18, leading=22, textColor=colors.HexColor("#4A8574"))
+    body_style = ParagraphStyle("B", parent=styles["Normal"], fontSize=8.5, leading=11.5)
+    bold_style = ParagraphStyle("BB", parent=body_style, fontName="Helvetica-Bold")
+    header_style = ParagraphStyle("H", parent=body_style, fontName="Helvetica-Bold", textColor=colors.white)
 
-    story.append(Paragraph(f"{APP_NAME} — Methodological Evaluation", title_style))
-    story.append(Paragraph("Automated critical evidence synthesis and methodological assessment report.", sub_style))
-
-    chk_status_text = (
-        "<font color='#1b7e1b'><b>PASSED (Zero Critical Flaws)</b></font>"
-        if data.get("checksum_passed", True)
-        else "<font color='#aa2222'><b>REVIEW REQUIRED (Flaws Detected)</b></font>"
-    )
+    story = [
+        Paragraph(f"{APP_NAME} — Methodological Evaluation", title_style),
+        Spacer(1, 10),
+    ]
 
     meta_data = [
-        [Paragraph("Evaluated Title:", bold_body_style), Paragraph(data.get("paper_title", "N/A"), body_style)],
-        [Paragraph("Authors:", bold_body_style), Paragraph(data.get("authors", "Not Specified"), body_style)],
-        [Paragraph("Journal & Year:", bold_body_style), Paragraph(f"{data.get('journal', 'N/A')} ({data.get('year_published', 'N/A')})", body_style)],
-        [Paragraph("DOI / Reference:", bold_body_style), Paragraph(data.get("doi", "N/A"), body_style)],
-        [Paragraph("Study Architecture:", bold_body_style), Paragraph(data.get("study_design", "N/A"), body_style)],
-        [Paragraph("Gold-Standard Tool Applied:", bold_body_style), Paragraph(data.get("appraisal_tool_selected", "N/A"), body_style)],
-        [Paragraph("Evidence Groundedness:", bold_body_style), Paragraph(f"{data.get('groundedness_score', 100.0)}% Evidence Grounded in Document", bold_body_style)],
-        [Paragraph("Methodological Checksum:", bold_body_style), Paragraph(chk_status_text, body_style)],
+        [Paragraph("Evaluated Title:", bold_style), Paragraph(data.get("paper_title", "N/A"), body_style)],
+        [Paragraph("Authors:", bold_style), Paragraph(data.get("authors", "Not Specified"), body_style)],
+        [Paragraph("Journal & Year:", bold_style), Paragraph(f"{data.get('journal', 'N/A')} ({data.get('year_published', 'N/A')})", body_style)],
+        [Paragraph("Tool Applied:", bold_style), Paragraph(data.get("appraisal_tool_selected", "N/A"), body_style)],
+        [Paragraph("Verdict:", bold_style), Paragraph(data.get("overall_verdict", "N/A"), bold_style)],
     ]
     t_meta = Table(meta_data, colWidths=[1.8 * inch, 5.6 * inch])
     t_meta.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F2F5F8')),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#EBF5F2')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1E7DF')),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
         ('TOPPADDING', (0, 0), (-1, -1), 3),
     ]))
     story.append(t_meta)
-    story.append(Spacer(1, 10))
+    story.append(Spacer(1, 12))
 
-    tier = str(data.get("quality_tier", "")).upper()
-    if "GREEN" not in tier and "YELLOW" not in tier and "RED" not in tier:
-        v = str(data.get("overall_verdict", "")).lower()
-        tier = "GREEN" if any(w in v for w in ["low", "high", "recommended"]) else ("YELLOW" if any(w in v for w in ["some", "moderate"]) else "RED")
-
-    story.append(Paragraph("Methodological Rigour & Clinical Trustworthiness Gauge (At-A-Glance):", bold_body_style))
-    story.append(Spacer(1, 4))
-
-    r_text = (
-        "<font color='white'><b>✓ HIGH RISK / FLAWED</b><br/><b>[ ✓ SELECTED TIER ]</b><br/>(Limited Reliability)</font>"
-        if tier == "RED"
-        else "<font color='#777777'>HIGH RISK / FLAWED<br/>(Limited Reliability)</font>"
-    )
-    y_text = (
-        "<font color='white'><b>✓ MODERATE CONCERNS</b><br/><b>[ ✓ SELECTED TIER ]</b><br/>(Conditional Validity)</font>"
-        if tier == "YELLOW"
-        else "<font color='#777777'>MODERATE CONCERNS<br/>(Conditional Validity)</font>"
-    )
-    g_text = (
-        "<font color='white'><b>✓ ROBUST / LOW RISK</b><br/><b>[ ✓ SELECTED TIER ]</b><br/>(Strong Clinical Validity)</font>"
-        if tier == "GREEN"
-        else "<font color='#777777'>ROBUST / LOW RISK<br/>(Strong Clinical Validity)</font>"
-    )
-
-    gauge_data = [[
-        Paragraph(r_text, body_style),
-        Paragraph(y_text, body_style),
-        Paragraph(g_text, body_style),
-    ]]
-    t_gauge = Table(gauge_data, colWidths=[2.46 * inch, 2.46 * inch, 2.46 * inch])
-    
-    gauge_styles = [
-        ('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#C0392B') if tier == "RED" else colors.HexColor('#FADBD8')),
-        ('BACKGROUND', (1, 0), (1, 0), colors.HexColor('#D4AC0D') if tier == "YELLOW" else colors.HexColor('#FCF3CF')),
-        ('BACKGROUND', (2, 0), (2, 0), colors.HexColor('#229954') if tier == "GREEN" else colors.HexColor('#D5F5E3')),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#BDC3C7')),
-        ('TOPPADDING', (0, 0), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-    ]
-
-    active_col = 0 if tier == "RED" else (1 if tier == "YELLOW" else 2)
-    border_color = (
-        colors.HexColor('#78281F') if tier == "RED" else (
-            colors.HexColor('#7D6608') if tier == "YELLOW" else colors.HexColor('#145A32')
-        )
-    )
-    gauge_styles.append(('BOX', (active_col, 0), (active_col, 0), 2.5, border_color))
-
-    t_gauge.setStyle(TableStyle(gauge_styles))
-    story.append(t_gauge)
-    story.append(Spacer(1, 10))
-
-    flaws = data.get("checksum_flaws", [])
-    if flaws:
-        story.append(Paragraph("Methodological Flaw & Contradiction Alerts:", h1_style))
-        for f in flaws:
-            story.append(Paragraph(f"<font color='#aa2222'>• {f}</font>", body_style))
-            story.append(Spacer(1, 3))
-        story.append(Spacer(1, 6))
-
-    story.append(Paragraph(f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})", h1_style))
-    domain_table_data = [[
-        Paragraph("Domain & Prompt Criterion", table_header_style),
-        Paragraph("Score", table_header_style),
-        Paragraph("Grounded Quote & Citation", table_header_style),
-        Paragraph("Methodological Critique", table_header_style),
-    ]]
-
+    story.append(Paragraph("1. Domain Appraisal", styles["Heading2"]))
+    domain_data = [[Paragraph("Domain & Criterion", header_style), Paragraph("Score", header_style), Paragraph("Evidence", header_style), Paragraph("Critique", header_style)]]
     for d in data.get("domain_appraisals", []):
-        chk_status = d.get("checksum_status", "Verified Grounded")
-        chk_tag = "<font color='#1b7e1b'><b>✓ Verified</b></font>" if "Verified" in chk_status else "<font color='#aa2222'><b>⚠️ Unverified</b></font>"
-        
-        domain_cell = Paragraph(f"<b>{d.get('domain_name', '')}</b><br/><br/><i>{d.get('evaluation_question', '')}</i>", body_style)
-        rating_cell = Paragraph(f"<b>{d.get('rating', '')}</b>", bold_body_style)
-        evidence_cell = Paragraph(f"<b>[{d.get('location_reference', 'Section')}]</b><br/><i>\"{d.get('verbatim_evidence', '')}\"</i><br/><br/>{chk_tag}", body_style)
-        critique_cell = Paragraph(d.get("critique", ""), body_style)
-        domain_table_data.append([domain_cell, rating_cell, evidence_cell, critique_cell])
-
-    t_domains = Table(domain_table_data, colWidths=[2.2 * inch, 0.9 * inch, 2.3 * inch, 2.0 * inch], repeatRows=1)
+        domain_data.append([
+            Paragraph(f"<b>{d.get('domain_name')}</b><br/><i>{d.get('evaluation_question')}</i>", body_style),
+            Paragraph(f"<b>{d.get('rating')}</b>", bold_style),
+            Paragraph(f"[{d.get('location_reference')}]<br/>\"{d.get('verbatim_evidence')}\"", body_style),
+            Paragraph(d.get("critique", ""), body_style),
+        ])
+    t_domains = Table(domain_data, colWidths=[2.2 * inch, 0.9 * inch, 2.3 * inch, 2.0 * inch], repeatRows=1)
     t_domains.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1F4E79')),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#78BBA6')),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
@@ -1338,81 +642,58 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_domains)
     story.append(Spacer(1, 12))
 
-    story.append(Paragraph("2. Methodological Synthesis & Scorecard Summary", h1_style))
-    story.append(Paragraph(f"<b>Executive Synthesis:</b> {data.get('overall_synthesis', '')}", body_style))
-    story.append(Spacer(1, 8))
-
-    score_data = [[
-        Paragraph("Domain Item", table_header_style),
-        Paragraph("Score / Rating", table_header_style),
-        Paragraph("Determination", table_header_style)
-    ]]
-    for item in data.get("domain_appraisals", []):
-        rating_str = str(item.get("rating", "")).lower()
-        if any(w in rating_str for w in ["low", "yes", "6", "7", "adequate", "2"]):
-            badge = "Satisfactory"
-        elif any(w in rating_str for w in ["some", "moderate", "partial", "4", "5", "1"]):
-            badge = "Minor / Moderate Concern"
-        else:
-            badge = "High Concern / Deficit"
-        score_data.append([
-            Paragraph(item.get("domain_name", ""), body_style),
-            Paragraph(f"<b>{item.get('rating', '')}</b>", body_style),
-            Paragraph(badge, body_style)
-        ])
-
-    t_score = Table(score_data, colWidths=[3.4 * inch, 2.0 * inch, 2.0 * inch], repeatRows=1)
-    t_score.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#333F48')),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-    ]))
-    story.append(t_score)
-    story.append(Spacer(1, 8))
-
-    story.append(Paragraph(f"<b>Final Determination:</b> <font color='#aa2222'><b>{data.get('overall_verdict', 'N/A')}</b></font>", bold_body_style))
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("3. Appraisal Framework & Standards Appendix", h1_style))
-    tool_meta = data.get("tool_meta", {})
-    ref_data = [
-        [Paragraph("Tool & Abbreviation:", bold_body_style), Paragraph(f"{tool_meta.get('acronym', 'Tool')} — {tool_meta.get('full_name', '')}", body_style)],
-        [Paragraph("Instrument Purpose:", bold_body_style), Paragraph(tool_meta.get("purpose", ""), body_style)],
-        [Paragraph("Scoring Scale:", bold_body_style), Paragraph(tool_meta.get("scoring_rules", ""), body_style)],
-    ]
-    t_ref = Table(ref_data, colWidths=[1.8 * inch, 5.6 * inch])
-    t_ref.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F2F5F8')),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-    ]))
-    story.append(t_ref)
+    story.append(Paragraph("2. Synthesis", styles["Heading2"]))
+    story.append(Paragraph(data.get("overall_synthesis", ""), body_style))
 
     doc.build(story)
     buf.seek(0)
     return buf
 
 
-# ==========================================
-# 5. STREAMLIT APP & SECURITY GATE
-# ==========================================
-st.set_page_config(page_title=APP_NAME, page_icon="📑", layout="wide")
+st.set_page_config(page_title=APP_NAME, page_icon="🌿", layout="wide")
 init_db()
 
+# Pastel Seafoam Green UI Palette
 st.markdown(
     """
 <style>
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: 600; }
-    .history-card {
-        padding: 8px 10px;
-        margin-bottom: 6px;
-        border-radius: 6px;
-        background-color: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+    /* Global Buttons */
+    .stButton>button, .stDownloadButton>button {
+        background-color: #78BBA6 !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        transition: all 0.2s ease-in-out !important;
+    }
+    .stButton>button:hover, .stDownloadButton>button:hover {
+        background-color: #5FA38E !important;
+        color: #FFFFFF !important;
+        box-shadow: 0 4px 10px rgba(120, 187, 166, 0.35) !important;
+    }
+    .stButton>button:active, .stDownloadButton>button:active {
+        background-color: #4A8574 !important;
+    }
+    /* Chat Input Button & Focus */
+    div[data-testid="stChatInput"] button {
+        background-color: #78BBA6 !important;
+        color: white !important;
+    }
+    div[data-testid="stChatInput"] textarea:focus {
+        border-color: #78BBA6 !important;
+        box-shadow: 0 0 0 1px #78BBA6 !important;
+    }
+    /* Accent Cards & Badges */
+    .metric-card {
+        background-color: rgba(120, 187, 166, 0.08);
+        border: 1px solid rgba(120, 187, 166, 0.3);
+        border-radius: 8px;
+        padding: 12px;
+    }
+    /* Radio & Checkboxes */
+    div[role="radiogroup"] > label > div:first-child[aria-checked="true"] {
+        background-color: #78BBA6 !important;
+        border-color: #78BBA6 !important;
     }
 </style>
 """,
@@ -1425,51 +706,39 @@ if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
 if not st.session_state["authenticated"]:
-    st.title(f"🔒 {APP_NAME}: Access Restricted")
-    st.write("Please enter the passcode to access the appraisal workspace.")
-    passcode_input = st.text_input("Passcode", type="password")
-    if st.button("Unlock App"):
+    st.title(f"🔒 {APP_NAME}")
+    passcode_input = st.text_input("Access Passcode", type="password")
+    if st.button("Unlock Appraisal Workspace"):
         if passcode_input.strip() == CORRECT_PASSCODE:
             st.session_state["authenticated"] = True
             st.rerun()
         else:
-            st.error("Invalid passcode. Please try again.")
+            st.error("Invalid passcode.")
     st.stop()
 
-# --- Main App Header ---
-st.title(f"📑 {APP_NAME}")
-st.caption("Automated Methodological Critical Appraisal & Evidence Synthesis")
+st.title(f"🌿 {APP_NAME}")
+st.caption("Methodological Evidence Quality Synthesis & Diagnostic Review Engine")
 
 api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None))
 
 if "history_limit" not in st.session_state:
     st.session_state["history_limit"] = 10
-
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
-
 if "raw_paper_text" not in st.session_state:
     st.session_state["raw_paper_text"] = ""
 
 with st.sidebar:
     st.header("⚙️ Configuration")
     if not api_key:
-        api_key = st.text_input(
-            "Service Access Key",
-            type="password",
-            help="Enter your active validation credential key",
-        )
+        api_key = st.text_input("Service Access Key", type="password")
     else:
-        st.success("Access Credential Verified")
+        st.success("Access Credential Active")
 
     strictness_choice = st.radio(
         "Adjudication Strictness:",
-        options=[
-            "Strict (Zero Benefit of Doubt)",
-            "Auditor / Forensic (Zero Tolerance)",
-        ],
+        options=["Strict (Zero Benefit of Doubt)", "Auditor / Forensic (Zero Tolerance)"],
         index=0,
-        help="Enforces that missing reporting automatically equals risk of bias, adhering strictly to gold-standard rubrics."
     )
 
     if st.button("Log Out"):
@@ -1479,146 +748,97 @@ with st.sidebar:
     st.markdown("---")
     st.header("🗄️ Past Appraisals")
     records = get_all_appraisals()
-    
     if not records:
-        st.caption("No saved appraisals yet.")
+        st.caption("No saved records.")
     else:
-        current_limit = st.session_state["history_limit"]
-        displayed_records = records[:current_limit]
-        
-        st.caption(f"Showing {len(displayed_records)} of {len(records)} entries")
-
-        for r in displayed_records:
-            verdict_text = str(r.get("overall_verdict", "")).lower()
-            if any(w in verdict_text for w in ["low", "recommended", "high confidence", "good"]):
-                dot = "🟢"
-            elif any(w in verdict_text for w in ["some", "moderate", "fair"]):
-                dot = "🟡"
-            else:
-                dot = "🔴"
-
-            with st.container():
-                short_title = r["paper_title"][:38] + "..." if len(r["paper_title"]) > 38 else r["paper_title"]
-                st.markdown(
-                    f"**{dot} {short_title}**  \n"
-                    f"<small style='color: gray;'>{r['created_at'][:10]} · {r['tool_selected']}</small>",
-                    unsafe_allow_html=True
-                )
-                
-                c_load, c_del = st.columns([3, 1])
-                with c_load:
-                    if st.button("View", key=f"view_{r['id']}", use_container_width=True):
-                        st.session_state["appraisal_data"] = get_appraisal_by_id(r["id"])
-                        st.session_state["chat_history"] = []
-                        st.rerun()
-                with c_del:
-                    if st.button("🗑️", key=f"del_{r['id']}", use_container_width=True):
-                        delete_appraisal(r["id"])
-                        st.rerun()
-                st.markdown("<hr style='margin: 8px 0; border: none; border-top: 1px solid rgba(255,255,255,0.08);'/>", unsafe_allow_html=True)
+        for r in records[:st.session_state["history_limit"]]:
+            short_title = r["paper_title"][:34] + "..." if len(r["paper_title"]) > 34 else r["paper_title"]
+            st.markdown(f"**{short_title}**\n<small>{r['created_at'][:10]} · {r['tool_selected']}</small>", unsafe_allow_html=True)
+            c_load, c_del = st.columns([3, 1])
+            with c_load:
+                if st.button("Load", key=f"v_{r['id']}", use_container_width=True):
+                    st.session_state["appraisal_data"] = get_appraisal_by_id(r["id"])
+                    st.session_state["chat_history"] = []
+                    st.rerun()
+            with c_del:
+                if st.button("🗑️", key=f"d_{r['id']}", use_container_width=True):
+                    delete_appraisal(r["id"])
+                    st.rerun()
+            st.markdown("<hr style='margin: 4px 0;'/>", unsafe_allow_html=True)
 
         if len(records) > 10:
-            if current_limit == 10:
-                if st.button("⬇️ Show More (Up to 50)"):
+            if st.session_state["history_limit"] == 10:
+                if st.button("Show More (50)"):
                     st.session_state["history_limit"] = 50
                     st.rerun()
             else:
-                if st.button("⬆️ Show Less (Top 10)"):
+                if st.button("Show Less (10)"):
                     st.session_state["history_limit"] = 10
                     st.rerun()
 
-tab_pdf, tab_url = st.tabs(["📤 Upload PDF (Mobile / Desktop)", "🔗 Enter Link or DOI"])
-
+tab_pdf, tab_url = st.tabs(["📤 Upload PDF", "🔗 Enter Link / DOI"])
 paper_text = ""
 raw_pdf_bytes = None
 filename_tag = "Paper"
 
 with tab_pdf:
-    uploaded = st.file_uploader(
-        "Upload Manuscript or Clinical Practice Guideline", type=["pdf"]
-    )
+    uploaded = st.file_uploader("Upload Manuscript PDF", type=["pdf"])
     if uploaded:
         raw_pdf_bytes = uploaded.read()
         filename_tag = uploaded.name
-        with st.spinner("Extracting text locally from PDF pages..."):
+        with st.spinner("Extracting text..."):
             paper_text = extract_text_from_pdf_bytes(raw_pdf_bytes)
-
         if paper_text:
             st.session_state["raw_paper_text"] = paper_text
-            st.success(
-                f"⚡ Parsed text successfully ({len(paper_text):,} characters extracted)"
-            )
+            st.success(f"Parsed {len(paper_text):,} characters successfully.")
         else:
-            st.warning(
-                "⚠️ PDF appears scanned or image-based. System OCR pipeline will be used automatically."
-            )
+            st.warning("Scanned document detected. System OCR active.")
 
 with tab_url:
-    url_input = st.text_input(
-        "Paste Article Link or DOI",
-        placeholder="https://doi.org/10.1016/... or https://pubmed...",
-    )
-    if st.button("Fetch Article Content"):
+    url_input = st.text_input("Article Link or DOI")
+    if st.button("Fetch Article"):
         if url_input.strip():
-            with st.spinner("Retrieving article text..."):
+            with st.spinner("Retrieving text..."):
                 try:
                     paper_text = extract_text_from_url(url_input.strip())
                     st.session_state["raw_paper_text"] = paper_text
                     filename_tag = "Web_Article"
-                    st.success(f"Retrieved {len(paper_text):,} characters from link.")
+                    st.success(f"Retrieved {len(paper_text):,} characters.")
                 except Exception as e:
-                    st.error(f"Failed to fetch content: {str(e)}")
+                    st.error(f"Error fetching URL: {e}")
 
 active_tools = get_all_tools()
 available_designs = list(active_tools.keys()) + ["🔍 Auto-Detect & Discover Tool (If not in list)"]
-
-detected_design = "🔍 Auto-Detect & Discover Tool (If not in list)"
-if paper_text:
-    detected_design = classify_study_design_heuristically(paper_text)
+detected_design = classify_study_design_heuristically(paper_text) if paper_text else available_designs[-1]
 
 st.markdown("---")
-default_idx = (
-    available_designs.index(detected_design)
-    if detected_design in available_designs
-    else (len(available_designs) - 1)
-)
-
 selected_design = st.selectbox(
-    "Target Study Architecture & Appraisal Framework:",
+    "Target Study Architecture & Framework:",
     options=available_designs,
-    index=default_idx,
-    help="Select the framework or choose Auto-Detect. If an unlisted study design is analyzed, the system discovers its gold-standard tool and saves it permanently to this list for future use."
+    index=available_designs.index(detected_design) if detected_design in available_designs else (len(available_designs) - 1),
 )
 
-if st.button("⚡ Run Methodological Appraisal", type="primary"):
+if st.button("⚡ Run Methodological Appraisal", type="primary", use_container_width=True):
     if not api_key:
-        st.warning("Please enter your access key in the sidebar.")
+        st.warning("Enter access key in sidebar.")
     elif not paper_text and not raw_pdf_bytes:
-        st.warning("Please upload a PDF or fetch an article URL first.")
+        st.warning("Upload PDF or enter DOI.")
     else:
         client = genai.Client(api_key=api_key)
-        mode_label = (
-            "Vision OCR Pipeline"
-            if (raw_pdf_bytes and not paper_text)
-            else "Extracted Text (Normalized)"
-        )
-        
         target_design = selected_design
 
         if target_design == "🔍 Auto-Detect & Discover Tool (If not in list)":
-            with st.spinner("Analyzing methodology to discover gold-standard appraisal tool..."):
+            with st.spinner("Discovering best appraisal tool..."):
                 try:
-                    sample = paper_text if paper_text else "Document excerpt"
-                    discovered_name, discovered_tool = discover_appraisal_tool(client, sample)
+                    discovered_name, discovered_tool = discover_appraisal_tool(client, paper_text or "Excerpt")
                     save_discovered_tool(discovered_name, discovered_tool)
                     target_design = discovered_name
                     active_tools = get_all_tools()
-                    st.info(f"✨ Discovered and saved new framework: **{discovered_tool.get('tool')}** for *{discovered_name}*")
-                except Exception as e:
-                    st.error(f"Discovery failed: {e}. Falling back to Observational.")
+                    st.info(f"Adopted tool: **{discovered_tool.get('tool')}**")
+                except Exception:
                     target_design = "Observational Study (Cohort or Case-Control)"
 
-        with st.spinner(f"Evaluating under {target_design}..."):
+        with st.spinner("Executing rigorous appraisal..."):
             try:
                 raw_data = execute_manuscript_evaluation(
                     client,
@@ -1628,180 +848,98 @@ if st.button("⚡ Run Methodological Appraisal", type="primary"):
                     active_tools_map=active_tools,
                     strictness_mode=strictness_choice,
                 )
-                
-                verified_data, score, grounding_warns, flaw_warns = run_comprehensive_checksum(
-                    raw_data, paper_text, fuzzy_threshold=0.82
-                )
-                
+                verified_data, score, _, flaw_warns = run_comprehensive_checksum(raw_data, paper_text)
                 new_id = save_appraisal(verified_data, filename_tag)
                 st.session_state["appraisal_data"] = verified_data
                 st.session_state["chat_history"] = []
-                
-                chk_msg = "PASSED" if verified_data.get("checksum_passed") else "REVIEW REQUIRED"
-                st.success(f"Appraisal finished and saved (ID: #{new_id})! Groundedness: {score}% | Checksum: {chk_msg}")
+                st.success(f"Completed and saved (ID: #{new_id})")
                 st.rerun()
             except Exception as e:
-                st.error(f"Appraisal failed: {str(e)}")
+                st.error(f"Execution error: {e}")
 
-# Display Results
 if "appraisal_data" in st.session_state:
     data = st.session_state["appraisal_data"]
     st.markdown("---")
-    
-    st.subheader(f"📋 {data.get('paper_title', 'Untitled Manuscript')}")
-    
-    b1, b2, b3, b4 = st.columns(4)
-    with b1:
-        st.caption("👥 **Authors**")
-        st.write(data.get("authors", "Not Specified"))
-    with b2:
-        st.caption("📖 **Journal**")
-        st.write(data.get("journal", "Not Specified"))
-    with b3:
-        st.caption("📅 **Year**")
-        st.write(str(data.get("year_published", "N/A")))
-    with b4:
-        st.caption("🔗 **DOI / URL**")
-        doi_val = data.get("doi", "N/A")
-        if "10." in doi_val or "http" in doi_val:
-            clean_url = doi_val if doi_val.startswith("http") else f"https://doi.org/{doi_val}"
-            st.markdown(f"[{doi_val}]({clean_url})")
-        else:
-            st.write(doi_val)
+    st.subheader(f"📋 {data.get('paper_title', 'Untitled')}")
 
-    st.markdown("<br>", unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.metric("Study Design", data.get("study_design"))
+        st.metric("Architecture", data.get("study_design"))
     with c2:
-        st.metric("Tool Selected", data.get("appraisal_tool_selected"))
+        st.metric("Tool Applied", data.get("appraisal_tool_selected"))
     with c3:
         st.metric("Overall Verdict", data.get("overall_verdict"))
     with c4:
-        chk_score = data.get("groundedness_score", 100.0)
-        is_passed = data.get("checksum_passed", True)
-        status_label = "🟢 Passed" if is_passed else "🔴 Review Needed"
-        st.metric("Integrity Checksum", f"{chk_score}%", delta=status_label, help="Multi-layered local checksum validating evidence quotes, design alignment, and rating consistency.")
-
-    if data.get("checksum_flaws"):
-        st.error("🚨 **Critical Flaw / Inconsistency Alerts Detected:**")
-        for flaw in data["checksum_flaws"]:
-            st.markdown(f"- **{flaw}**")
-
-    if data.get("groundedness_warnings"):
-        with st.expander("⚠️ Citation Grounding Warnings"):
-            for w in data["groundedness_warnings"]:
-                st.write(f"- {w}")
+        st.metric("Groundedness", f"{data.get('groundedness_score', 100.0)}%")
 
     tier = str(data.get("quality_tier", "")).upper()
-    if "GREEN" not in tier and "YELLOW" not in tier and "RED" not in tier:
-        v = str(data.get("overall_verdict", "")).lower()
-        tier = "GREEN" if any(w in v for w in ["low", "high", "recommended"]) else ("YELLOW" if any(w in v for w in ["some", "moderate"]) else "RED")
+    g1, g2, g3 = st.columns(3)
+    with g1:
+        st.error("🚨 RED TIER (High Risk)" if tier == "RED" else "Red")
+    with g2:
+        st.warning("⚠️ YELLOW TIER (Moderate)" if tier == "YELLOW" else "Yellow")
+    with g3:
+        st.success("✅ GREEN TIER (Robust)" if tier == "GREEN" else "Green")
 
-    st.markdown("#### 🎯 At-A-Glance Quality Meter")
-    g_col1, g_col2, g_col3 = st.columns(3)
-    with g_col1:
-        if tier == "RED":
-            st.error("🚨 **[ ✓ SELECTED ] RED TIER**\nHigh Risk / Methodological Flaws")
-        else:
-            st.caption("Red (High Risk)")
-    with g_col2:
-        if tier == "YELLOW":
-            st.warning("⚠️ **[ ✓ SELECTED ] YELLOW TIER**\nModerate Quality / Some Concerns")
-        else:
-            st.caption("Yellow (Moderate)")
-    with g_col3:
-        if tier == "GREEN":
-            st.success("✅ **[ ✓ SELECTED ] GREEN TIER**\nRobust / Low Risk / Trustworthy")
-        else:
-            st.caption("Green (Robust)")
+    st.subheader("📊 Domain Analysis")
+    st.dataframe(
+        [
+            {
+                "Domain": d.get("domain_name"),
+                "Criterion": d.get("evaluation_question"),
+                "Score": d.get("rating"),
+                "Reference": d.get("location_reference"),
+                "Quote": d.get("verbatim_evidence"),
+                "Critique": d.get("critique"),
+            }
+            for d in data.get("domain_appraisals", [])
+        ],
+        use_container_width=True,
+    )
 
-    st.subheader("📊 Domain Breakdown with Questions")
-    rows = [
-        {
-            "Domain": d.get("domain_name"),
-            "Question / Criterion": d.get("evaluation_question"),
-            "Score/Rating": d.get("rating"),
-            "Reference": d.get("location_reference"),
-            "Verbatim Evidence": d.get("verbatim_evidence"),
-            "Checksum Status": d.get("checksum_status", "Verified Grounded"),
-            "Methodological Critique": d.get("critique"),
-        }
-        for d in data.get("domain_appraisals", [])
-    ]
-    st.dataframe(rows, use_container_width=True)
-
-    st.subheader("📝 Executive Summary & Findings")
+    st.subheader("📝 Executive Summary")
     st.info(data.get("overall_synthesis"))
 
-    tool_meta = data.get("tool_meta", {})
-    if tool_meta:
-        with st.expander("📖 Appraisal Framework & Scoring Standards"):
-            st.markdown(f"**Tool:** {tool_meta.get('acronym')} ({tool_meta.get('full_name')})")
-            st.markdown(f"**Purpose:** {tool_meta.get('purpose')}")
-            st.markdown(f"**Scoring Metric:** {tool_meta.get('scoring_rules')}")
-
-    # Export Documents (Word & PDF)
-    harvard_docx_name = format_harvard_filename(data, "docx")
-    harvard_pdf_name = format_harvard_filename(data, "pdf")
-
-    col_docx, col_pdf = st.columns(2)
-
-    with col_docx:
-        doc_buf = build_docx_report(data)
+    c_doc, c_pdf = st.columns(2)
+    with c_doc:
         st.download_button(
-            label="📥 Download Word Document (.docx)",
-            data=doc_buf,
-            file_name=harvard_docx_name,
+            "📥 Download Word (.docx)",
+            data=build_docx_report(data),
+            file_name=format_harvard_filename(data, "docx"),
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             use_container_width=True,
         )
-
-    with col_pdf:
-        pdf_buf = build_pdf_report(data)
+    with c_pdf:
         st.download_button(
-            label="📥 Download Formatted PDF (.pdf)",
-            data=pdf_buf,
-            file_name=harvard_pdf_name,
+            "📥 Download PDF (.pdf)",
+            data=build_pdf_report(data),
+            file_name=format_harvard_filename(data, "pdf"),
             mime="application/pdf",
             use_container_width=True,
         )
 
-    # ==========================================
-    # 6. INTERACTIVE AUDIT ASSISTANT (CHAT BOX)
-    # ==========================================
     st.markdown("---")
-    st.subheader("💬 Appraisal Interrogation & Audit Assistant")
-    st.caption("Ask questions about specific scores, check line/page citations, or flag methodological discrepancies.")
-
-    # Render ongoing chat history
+    st.subheader("💬 Interrogation Assistant")
     for msg in st.session_state["chat_history"]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Chat prompt input
-    if user_query := st.chat_input("Ask a question about this appraisal or paper (e.g. 'Where is blinding mentioned?', 'Why was domain 3 penalized?')..."):
+    if query := st.chat_input("Ask about specific scores or cite line locations..."):
         if not api_key:
-            st.error("Please ensure your validation credential key is entered in the sidebar.")
+            st.error("Key required.")
         else:
-            # Display user message
-            st.session_state["chat_history"].append({"role": "user", "content": user_query})
+            st.session_state["chat_history"].append({"role": "user", "content": query})
             with st.chat_message("user"):
-                st.markdown(user_query)
+                st.markdown(query)
 
-            # Generate and stream response
             client = genai.Client(api_key=api_key)
             with st.chat_message("assistant"):
-                with st.spinner("Reviewing manuscript citations and appraisal data..."):
+                with st.spinner("Checking manuscript text..."):
                     try:
                         reply = answer_interrogation_query(
-                            client,
-                            query=user_query,
-                            appraisal_json=data,
-                            raw_manuscript_text=st.session_state.get("raw_paper_text", ""),
-                            chat_history=st.session_state["chat_history"]
+                            client, query, data, st.session_state.get("raw_paper_text", ""), st.session_state["chat_history"]
                         )
                         st.markdown(reply)
                         st.session_state["chat_history"].append({"role": "assistant", "content": reply})
                     except Exception as err:
-                        st.error(f"Failed to interrogate report: {err}")
+                        st.error(f"Query error: {err}")
