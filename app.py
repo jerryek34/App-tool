@@ -39,81 +39,8 @@ def get_connection():
     return conn
 
 
-def init_db():
-    with get_connection() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS appraisals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                paper_title TEXT NOT NULL,
-                study_design TEXT,
-                tool_selected TEXT,
-                overall_verdict TEXT,
-                source_name TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                full_json TEXT NOT NULL
-            )
-        """)
-        conn.commit()
-
-
-def save_appraisal(data: dict, source_name: str) -> int:
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO appraisals (
-                paper_title, study_design, tool_selected, 
-                overall_verdict, source_name, created_at, full_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                data.get("paper_title", "Untitled Manuscript"),
-                data.get("study_design", "Unknown"),
-                data.get("appraisal_tool_selected", "Unknown"),
-                data.get("overall_verdict", "Unknown"),
-                source_name,
-                datetime.now().strftime("%Y-%m-%d %H:%M"),
-                json.dumps(data),
-            ),
-        )
-        conn.commit()
-        return cursor.lastrowid
-
-
-def get_all_appraisals() -> List[Dict]:
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, paper_title, study_design, tool_selected, 
-                   overall_verdict, source_name, created_at 
-            FROM appraisals 
-            ORDER BY id DESC
-        """)
-        return [dict(row) for row in cursor.fetchall()]
-
-
-def get_appraisal_by_id(appraisal_id: int) -> Optional[dict]:
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT full_json FROM appraisals WHERE id = ?", (appraisal_id,)
-        )
-        row = cursor.fetchone()
-        if row:
-            return json.loads(row["full_json"])
-        return None
-
-
-def delete_appraisal(appraisal_id: int):
-    with get_connection() as conn:
-        conn.execute("DELETE FROM appraisals WHERE id = ?", (appraisal_id,))
-        conn.commit()
-
-
-# ==========================================
-# 2. APPRAISAL FRAMEWORKS & TAXONOMY
-# ==========================================
-TOOL_TAXONOMY = {
+# Base taxonomy used to seed the database on initial run
+SEED_TAXONOMY = {
     "Clinical Practice Guideline / Consensus Statement": {
         "tool": "AGREE II",
         "full_name": "Appraisal of Guidelines for Research & Evaluation II",
@@ -193,7 +120,7 @@ TOOL_TAXONOMY = {
             },
             {
                 "name": "Domain 4: Deviations from intended interventions",
-                "question": "Were there systematic deviations from intended interventions arising because of the experimental context?",
+                "question": "Were there systematic deviations from intended interventions or co-interventions unbalanced between groups?",
             },
             {
                 "name": "Domain 5: Missing data",
@@ -201,7 +128,7 @@ TOOL_TAXONOMY = {
             },
             {
                 "name": "Domain 6: Measurement of outcomes",
-                "question": "Were outcome assessors blinded, and were outcome measures valid, reliable, and applied equally?",
+                "question": "Were outcome assessors blinded to exposure status, and were outcome measures valid, reliable, and applied equally?",
             },
             {
                 "name": "Domain 7: Selection of the reported result",
@@ -225,11 +152,11 @@ TOOL_TAXONOMY = {
             },
             {
                 "name": "Domain 3: Duplicate Study Selection & Extraction",
-                "question": "Did at least two authors independently screen titles, abstracts, and full texts, and extract study data?",
+                "question": "Did at least two reviewers independently screen titles, abstracts, and full texts with documented consensus agreement?",
             },
             {
                 "name": "Domain 4: Excluded Studies Justification (Critical Domain)",
-                "question": "Did the authors provide a comprehensive list of potentially relevant excluded studies along with explicit reasons for each exclusion?",
+                "question": "Did the authors provide a full bibliographic list of potentially relevant excluded studies along with explicit reasons for each exclusion?",
             },
             {
                 "name": "Domain 5: Primary Study RoB Assessment (Critical Domain)",
@@ -241,7 +168,7 @@ TOOL_TAXONOMY = {
             },
             {
                 "name": "Domain 7: Publication Bias Assessment (Critical Domain)",
-                "question": "Did the authors investigate publication bias (funnel plots, Egger's test) and discuss its likely clinical impact?",
+                "question": "Did the authors formally test for small-study effects/publication bias (funnel plots, Egger's test) for comparisons with >=10 studies?",
             },
             {
                 "name": "Domain 8: Conflict of Interest & Funding Reporting",
@@ -289,7 +216,7 @@ TOOL_TAXONOMY = {
             },
             {
                 "name": "Domain 4: Flow and Timing",
-                "question": "Was the time interval between index and reference tests appropriate, and did all patients receive the verified reference standard?",
+                "question": "Was the time interval between index and reference tests appropriate, and did all patients receive the same reference test?",
             },
         ],
         "scale": "Low Risk | High Risk | Unclear Risk. If details are not reported, score as Unclear or High Risk; never assume Low Risk.",
@@ -360,8 +287,116 @@ TOOL_TAXONOMY = {
     },
 }
 
+
+def init_db():
+    with get_connection() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS appraisals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                paper_title TEXT NOT NULL,
+                study_design TEXT,
+                tool_selected TEXT,
+                overall_verdict TEXT,
+                source_name TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                full_json TEXT NOT NULL
+            )
+        """)
+        # Persistent storage table for custom and newly discovered tools
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS custom_tools (
+                design_name TEXT PRIMARY KEY,
+                tool_data TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Seed default tools if empty
+        cursor = conn.cursor()
+        cursor.execute("SELECT count(*) as cnt FROM custom_tools")
+        if cursor.fetchone()["cnt"] == 0:
+            for design_name, tool_obj in SEED_TAXONOMY.items():
+                cursor.execute(
+                    "INSERT OR IGNORE INTO custom_tools (design_name, tool_data) VALUES (?, ?)",
+                    (design_name, json.dumps(tool_obj)),
+                )
+        conn.commit()
+
+
+def get_all_tools() -> Dict[str, dict]:
+    """Retrieves all tools (built-in + dynamically discovered) from SQLite."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT design_name, tool_data FROM custom_tools ORDER BY rowid ASC")
+        rows = cursor.fetchall()
+        return {row["design_name"]: json.loads(row["tool_data"]) for row in rows}
+
+
+def save_discovered_tool(design_name: str, tool_obj: dict):
+    """Saves a newly discovered appraisal tool into SQLite so it permanently stays in the dropdown."""
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO custom_tools (design_name, tool_data) VALUES (?, ?)",
+            (design_name, json.dumps(tool_obj)),
+        )
+        conn.commit()
+
+
+def save_appraisal(data: dict, source_name: str) -> int:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO appraisals (
+                paper_title, study_design, tool_selected, 
+                overall_verdict, source_name, created_at, full_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                data.get("paper_title", "Untitled Manuscript"),
+                data.get("study_design", "Unknown"),
+                data.get("appraisal_tool_selected", "Unknown"),
+                data.get("overall_verdict", "Unknown"),
+                source_name,
+                datetime.now().strftime("%Y-%m-%d %H:%M"),
+                json.dumps(data),
+            ),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+
+def get_all_appraisals() -> List[Dict]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, paper_title, study_design, tool_selected, 
+                   overall_verdict, source_name, created_at 
+            FROM appraisals 
+            ORDER BY id DESC
+        """)
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_appraisal_by_id(appraisal_id: int) -> Optional[dict]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT full_json FROM appraisals WHERE id = ?", (appraisal_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return json.loads(row["full_json"])
+        return None
+
+
+def delete_appraisal(appraisal_id: int):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM appraisals WHERE id = ?", (appraisal_id,))
+        conn.commit()
+
+
 # ==========================================
-# 3. EXTRACTION, CHECKSUM & PROCESSING ENGINE
+# 3. EXTRACTION, HEURISTICS & AUTO-TOOL DISCOVERY
 # ==========================================
 def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     try:
@@ -392,7 +427,8 @@ def extract_text_from_url(url: str) -> str:
 
 
 def classify_study_design_heuristically(text: str) -> str:
-    header_text = text[:7000].lower()
+    """Scans up to 12,000 characters to reliably catch Abstract and Methods."""
+    header_text = text[:12000].lower()
 
     if any(re.search(p, header_text) for p in [
         r"clinical\s+practice\s+guideline",
@@ -412,12 +448,11 @@ def classify_study_design_heuristically(text: str) -> str:
         return "Systematic Review / Meta-Analysis"
 
     if any(re.search(p, header_text) for p in [
-        r"randomised\s+controlled\s+trial",
-        r"randomized\s+controlled\s+trial",
+        r"randomi[zs]ed\s+controlled\s+trial",
         r"double-blind",
         r"placebo-controlled",
         r"randomly\s+assigned",
-        r"rct\b"
+        r"\brct\b"
     ]):
         return "Randomized Controlled Trial (RCT)"
 
@@ -430,6 +465,23 @@ def classify_study_design_heuristically(text: str) -> str:
     ]):
         return "Diagnostic Accuracy Study"
 
+    # Robust Observational and Comparative detection
+    if any(re.search(p, header_text) for p in [
+        r"retrospective\s+comparative",
+        r"comparative\s+study",
+        r"comparative\s+observational",
+        r"retrospective\s+(?:cohort|study|review|analysis|audit|case)",
+        r"prospective\s+(?:cohort|study|review|analysis|observational)",
+        r"cohort\s+study",
+        r"case-control",
+        r"cross-sectional",
+        r"observational\s+study",
+        r"longitudinal\s+study",
+        r"prevalence\s+study",
+        r"incidence\s+study"
+    ]):
+        return "Observational Study (Cohort or Case-Control)"
+
     if any(re.search(p, header_text) for p in [
         r"qualitative\s+study",
         r"thematic\s+analysis",
@@ -441,24 +493,23 @@ def classify_study_design_heuristically(text: str) -> str:
         return "Qualitative Study"
 
     if any(re.search(p, header_text) for p in [
-        r"cohort\s+study",
-        r"prospective\s+cohort",
-        r"retrospective\s+cohort",
-        r"case-control",
-        r"cross-sectional\s+study",
-        r"longitudinal\s+study"
-    ]):
-        return "Observational Study (Cohort or Case-Control)"
-
-    if any(re.search(p, header_text) for p in [
         r"quasi-experimental",
-        r"non-randomi[zs]ed",
+        r"non-randomi[zs]ed\s+(?:trial|study|intervention)",
         r"controlled\s+before-and-after",
         r"interrupted\s+time\s+series"
     ]):
         return "Non-Randomized Intervention / Quasi-Experimental"
 
-    return "Narrative Review"
+    if any(re.search(p, header_text) for p in [
+        r"narrative\s+review",
+        r"scoping\s+review",
+        r"literature\s+review",
+        r"state\s+of\s+the\s+art\s+review"
+    ]):
+        return "Narrative Review"
+
+    # Signal for automated discovery if unclassified
+    return "🔍 Auto-Detect & Discover Tool (If not in list)"
 
 
 def trim_manuscript_body(text: str) -> str:
@@ -543,7 +594,6 @@ def run_comprehensive_checksum(
     if not domains:
         return data, 100.0, [], ["No domain appraisals populated."]
 
-    # 1. Groundedness Verification
     verified_count = 0
     for d in domains:
         quote = d.get("verbatim_evidence", "").strip()
@@ -571,7 +621,6 @@ def run_comprehensive_checksum(
 
     grounded_score = round((verified_count / len(domains)) * 100, 1)
 
-    # 2. Strict Methodological Contradiction Check
     tier = str(data.get("quality_tier", "")).upper()
     overall_verdict = str(data.get("overall_verdict", "")).lower()
 
@@ -595,24 +644,6 @@ def run_comprehensive_checksum(
             "Verdict Conflict: Overall verdict states Low Risk/High Quality despite identified high-risk domain deficiencies."
         )
 
-    # 3. Architectural Alignment Check
-    design = str(data.get("study_design", "")).lower()
-    text_sample = full_raw_text[:12000].lower()
-
-    if "randomized controlled trial" in design and not any(
-        term in text_sample for term in ["random", "trial", "allocation", "rct", "group"]
-    ):
-        flaw_warnings.append(
-            "Design Alert: Classified as an RCT, but standard randomization terms are absent in the initial text."
-        )
-    elif "systematic review" in design and not any(
-        term in text_sample for term in ["systematic", "meta-analysis", "search", "prisma", "pubmed", "cochrane", "databases"]
-    ):
-        flaw_warnings.append(
-            "Design Alert: Classified as Systematic Review, but systematic search/PRISMA terms are missing in the text."
-        )
-
-    # 4. Evidence Gap Audit
     empty_evidence_domains = [
         d.get("domain_name") for d in domains if not str(d.get("verbatim_evidence", "")).strip()
     ]
@@ -630,42 +661,75 @@ def run_comprehensive_checksum(
 
 
 def format_harvard_filename(data: dict, extension: str) -> str:
-    """
-    Constructs filename according to the Harvard short citation convention:
-    [LeadAuthor]_[Year]_[ToolUsed]_KAT.[ext] or [LeadAuthor_et_al]_[Year]_[ToolUsed]_KAT.[ext]
-    """
     raw_authors = str(data.get("authors", "")).strip()
     year = str(data.get("year_published", "")).strip()
     tool = str(data.get("appraisal_tool_selected", "Tool")).strip()
 
-    # Extract 4-digit year fallback if needed
     year_match = re.search(r"\b(19\d\d|20\d\d)\b", year)
     clean_year = year_match.group(1) if year_match else "UnknownYear"
 
-    # Determine Harvard short author format
     if not raw_authors or raw_authors.lower() in ["not specified", "unspecified", "unknown"]:
         author_part = "AuthorUnknown"
     else:
-        # Check for multiple authors indicators
         has_multiple = any(marker in raw_authors.lower() for marker in ["et al", " and ", "&", ","])
-        # Extract the primary surname
         first_segment = re.split(r"[,;&]|\sand\s|\set\sal", raw_authors, flags=re.IGNORECASE)[0].strip()
         tokens = [t for t in re.split(r"\s+", first_segment) if re.search(r"[a-zA-Z]", t)]
         if tokens:
-            # Drop trailing initials (e.g. "Smith JA" -> "Smith", or "Smith, J." -> "Smith")
             surname = tokens[-1] if (len(tokens) > 1 and len(tokens[0]) <= 2) else tokens[0]
             surname = re.sub(r"[^a-zA-Z0-9]", "", surname)
         else:
             surname = "Author"
-
         author_part = f"{surname}_et_al" if has_multiple else surname
 
-    # Sanitize tool and build final string
     clean_tool = re.sub(r"[^a-zA-Z0-9_-]", "_", tool)
     clean_author = re.sub(r"[^a-zA-Z0-9_-]", "_", author_part)
     clean_filename = f"{clean_author}_{clean_year}_{clean_tool}_KAT.{extension.lstrip('.')}"
-    # Deduplicate consecutive underscores
     return re.sub(r"_+", "_", clean_filename)
+
+
+# ==========================================
+# 4. DISCOVERY & EXECUTION ENGINES
+# ==========================================
+def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str, dict]:
+    """
+    Analyzes the study methodology, determines the internationally recognized gold-standard
+    critical appraisal tool, builds its domain questions and scoring rules, and returns it.
+    """
+    discovery_instruction = """
+    You are an expert academic epidemiologist and research methodologist.
+    Examine the provided text from a research manuscript.
+    1. Determine the EXACT epidemiological/clinical study architecture (e.g. Case Report, Cross-Sectional Survey, Health Economic Evaluation, Animal Model Study, Diagnostic Study, Scoping Review, Retrospective Comparative Cohort, etc.).
+    2. Identify the INTERNATIONALLY RECOGNIZED gold-standard critical appraisal instrument designed specifically for this architecture (e.g., Joanna Briggs Institute [JBI] Critical Appraisal Checklists, CARE Guidelines, STROBE, CHEERS, QUADAS-2, AMSTAR 2, RoB 2, NOS, etc.).
+    3. Construct a complete appraisal taxonomy including tool acronym, full name, clinical purpose, standard scoring scale, and 4 to 8 explicit methodological appraisal domains with direct criterion evaluation questions.
+
+    CRITICAL: Output ONLY a JSON object matching this structure:
+    {
+      "design_name": "Standardized Study Architecture Name",
+      "tool_taxonomy": {
+        "tool": "Tool Acronym",
+        "full_name": "Full Tool Name",
+        "purpose": "Precise methodological purpose",
+        "domains": [
+          {
+            "name": "Domain 1: Title",
+            "question": "Explicit criterion question to evaluate"
+          }
+        ],
+        "scale": "Full explanation of scoring thresholds and rating scale"
+      }
+    }
+    """
+    response = client.models.generate_content(
+        model="gemini-3.5-flash-lite",
+        contents=[f"MANUSCRIPT EXCERPT:\n{text_sample[:10000]}\n\nIdentify study architecture and gold-standard appraisal tool."],
+        config=types.GenerateContentConfig(
+            system_instruction=discovery_instruction,
+            response_mime_type="application/json",
+            temperature=0.0,
+        ),
+    )
+    res_json = json.loads(response.text)
+    return res_json["design_name"], res_json["tool_taxonomy"]
 
 
 def execute_manuscript_evaluation(
@@ -673,12 +737,14 @@ def execute_manuscript_evaluation(
     text_content: Optional[str] = None,
     raw_pdf_bytes: Optional[bytes] = None,
     assigned_design: Optional[str] = None,
+    active_tools_map: Optional[dict] = None,
     strictness_mode: str = "Strict (Zero Benefit of Doubt)",
 ) -> dict:
-    if assigned_design and assigned_design in TOOL_TAXONOMY:
-        active_tool_taxonomy = {assigned_design: TOOL_TAXONOMY[assigned_design]}
+    # Resolve tool taxonomy
+    if assigned_design and active_tools_map and assigned_design in active_tools_map:
+        active_tool_taxonomy = {assigned_design: active_tools_map[assigned_design]}
     else:
-        active_tool_taxonomy = TOOL_TAXONOMY
+        active_tool_taxonomy = active_tools_map if active_tools_map else SEED_TAXONOMY
 
     taxonomy_json = json.dumps(active_tool_taxonomy, indent=2)
 
@@ -692,15 +758,10 @@ def execute_manuscript_evaluation(
 
     OPERATIONAL AUDIT RULES:
     1. THE ABSENCE OF REPORTING IS THE PRESENCE OF BIAS:
-       - If authors fail to explicitly report allocation concealment methods, assume concealment was inadequate.
-       - If blinding of outcome assessors is not stated, assume assessments were unblinded.
-       - If trial registration (e.g., ClinicalTrials.gov, PROSPERO) is absent or occurred retrospectively after enrollment began, the paper MUST receive a negative or High Risk rating for reporting bias.
+       - If authors fail to explicitly report methodological safeguards (e.g. allocation concealment, blinding, confounder adjustment, prospective registration), assume it was NOT performed.
        - NEVER assume good clinical or research practice occurred unless substantiated word-for-word in the text.
     2. SCORING INTEGRITY:
-       - Do NOT be polite, generous, or lenient.
-       - In Cochrane RoB 2: If even ONE domain is High Risk, the overall risk of bias CANNOT be Low Risk or Some Concerns; it must be 'High Risk'.
-       - In AMSTAR 2: A deficit in even ONE critical domain (Protocol registration, Comprehensive search, Excluded studies list, Risk of bias assessment, Appropriate meta-analytic methods, Publication bias) drops confidence to 'Low' or 'Critically Low'.
-       - In AGREE II: Score 1 (Strongly Disagree) whenever an item is omitted. Only score 6-7 if the guideline provides exemplary, transparent, audited evidence.
+       - Do NOT be polite, generous, or lenient. Apply the exact scoring scale specified for the assigned tool.
     3. MANDATORY GROUNDED EVIDENCE:
        - For every single domain, provide the EXACT verbatim quote extracted directly from the paper.
        - If an item was NOT reported in the manuscript, explicitly state 'Not reported in text' as verbatim evidence, provide the section searched, and penalize the score accordingly.
@@ -796,7 +857,7 @@ def execute_manuscript_evaluation(
 
 
 # ==========================================
-# 4. WORD (.docx) & PDF EXPORT ENGINES
+# 5. WORD (.docx) & PDF EXPORT ENGINES
 # ==========================================
 def set_cell_background(cell, fill_hex: str):
     shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
@@ -850,7 +911,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
 
     doc.add_paragraph("")
 
-    # Visual Quality Meter
     tier = str(data.get("quality_tier", "")).upper()
     if "GREEN" not in tier and "YELLOW" not in tier and "RED" not in tier:
         v = str(data.get("overall_verdict", "")).lower()
@@ -975,7 +1035,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
 
     doc.add_paragraph("")
 
-    # Section 2: Summary of Findings and Final Scorecard
     doc.add_heading("2. Summary of Findings & Final Scorecard", level=1)
 
     doc.add_heading("Overall Methodological Synthesis", level=2)
@@ -1025,7 +1084,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
 
     doc.add_paragraph("")
 
-    # Section 3: Appraisal Standard Reference Appendix
     doc.add_heading("3. Standard Reference, Tool Abbreviation & Scoring Scales", level=1)
     
     tool_meta = data.get("tool_meta", {})
@@ -1033,15 +1091,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
     full_name = tool_meta.get("full_name") or "Standard Critical Appraisal Instrument"
     purpose = tool_meta.get("purpose") or "Standardized epidemiological instrument used to assess bias and study rigour."
     scoring_rules = tool_meta.get("scoring_rules") or "Standard qualitative rating or numerical score threshold."
-
-    design_match = TOOL_TAXONOMY.get(data.get("study_design", ""))
-    if design_match:
-        if not full_name or full_name == "Standard Critical Appraisal Instrument":
-            full_name = design_match.get("full_name", full_name)
-        if not purpose or "Standardized epidemiological" in purpose:
-            purpose = design_match.get("purpose", purpose)
-        if not scoring_rules or "Standard qualitative" in scoring_rules:
-            scoring_rules = design_match.get("scale", scoring_rules)
 
     app_table = doc.add_table(rows=4, cols=2)
     app_table.style = "Table Grid"
@@ -1313,7 +1362,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
 
 
 # ==========================================
-# 5. STREAMLIT APP & SECURITY GATE
+# 6. STREAMLIT APP & SECURITY GATE
 # ==========================================
 st.set_page_config(page_title=APP_NAME, page_icon="📑", layout="wide")
 init_db()
@@ -1378,7 +1427,7 @@ with st.sidebar:
             "Auditor / Forensic (Zero Tolerance)",
         ],
         index=0,
-        help="Enforces that missing reporting automatically equals risk of bias, adhering strictly to Cochrane RoB 2, AMSTAR 2, and AGREE II rubrics."
+        help="Enforces that missing reporting automatically equals risk of bias, adhering strictly to gold-standard rubrics."
     )
 
     if st.button("Log Out"):
@@ -1475,23 +1524,26 @@ with tab_url:
                 except Exception as e:
                     st.error(f"Failed to fetch content: {str(e)}")
 
-detected_design = "Randomized Controlled Trial (RCT)"
+# Load persistent tools from SQLite
+active_tools = get_all_tools()
+available_designs = list(active_tools.keys()) + ["🔍 Auto-Detect & Discover Tool (If not in list)"]
+
+detected_design = "🔍 Auto-Detect & Discover Tool (If not in list)"
 if paper_text:
     detected_design = classify_study_design_heuristically(paper_text)
 
 st.markdown("---")
-available_designs = list(TOOL_TAXONOMY.keys())
 default_idx = (
     available_designs.index(detected_design)
     if detected_design in available_designs
-    else 0
+    else (len(available_designs) - 1)
 )
 
 selected_design = st.selectbox(
-    "Target Study Architecture (Auto-detected via pattern heuristics):",
+    "Target Study Architecture & Appraisal Framework:",
     options=available_designs,
     index=default_idx,
-    help="Study design detected based on title, abstract, and methodology keywords. You can manually adjust it if needed."
+    help="Select the framework or choose Auto-Detect. If an unlisted study design is analyzed, the system discovers its gold-standard tool and saves it permanently to this list for future use."
 )
 
 if st.button("⚡ Run Methodological Appraisal", type="primary"):
@@ -1506,13 +1558,32 @@ if st.button("⚡ Run Methodological Appraisal", type="primary"):
             if (raw_pdf_bytes and not paper_text)
             else "Extracted Text (Normalized)"
         )
-        with st.spinner(f"Evaluating {selected_design} under {strictness_choice}..."):
+        
+        target_design = selected_design
+
+        # DYNAMIC DISCOVERY STEP: If Auto-Detect is selected or design isn't in database
+        if target_design == "🔍 Auto-Detect & Discover Tool (If not in list)":
+            with st.spinner("Analyzing methodology to discover gold-standard appraisal tool..."):
+                try:
+                    sample = paper_text if paper_text else "Document excerpt"
+                    discovered_name, discovered_tool = discover_appraisal_tool(client, sample)
+                    save_discovered_tool(discovered_name, discovered_tool)
+                    target_design = discovered_name
+                    # Reload tools map with new discovery
+                    active_tools = get_all_tools()
+                    st.info(f"✨ Discovered and saved new framework: **{discovered_tool.get('tool')}** for *{discovered_name}*")
+                except Exception as e:
+                    st.error(f"Discovery failed: {e}. Falling back to Observational.")
+                    target_design = "Observational Study (Cohort or Case-Control)"
+
+        with st.spinner(f"Evaluating under {target_design}..."):
             try:
                 raw_data = execute_manuscript_evaluation(
                     client,
                     text_content=paper_text,
                     raw_pdf_bytes=raw_pdf_bytes if not paper_text else None,
-                    assigned_design=selected_design,
+                    assigned_design=target_design,
+                    active_tools_map=active_tools,
                     strictness_mode=strictness_choice,
                 )
                 
