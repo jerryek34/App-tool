@@ -252,7 +252,7 @@ def appraise_with_gemini(client: genai.Client, file_bytes: bytes = None, text_co
     contents.append("Perform the full critical appraisal on this paper and return the JSON object.")
 
     response = client.models.generate_content(
-      model="gemini-3.1-pro-preview",
+        model="gemini-2.5-flash",
         contents=contents,
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
