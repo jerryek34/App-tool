@@ -39,7 +39,6 @@ def get_connection():
     return conn
 
 
-# Base taxonomy used to seed the database on initial run
 SEED_TAXONOMY = {
     "Clinical Practice Guideline / Consensus Statement": {
         "tool": "AGREE II",
@@ -302,7 +301,6 @@ def init_db():
                 full_json TEXT NOT NULL
             )
         """)
-        # Persistent storage table for custom and newly discovered tools
         conn.execute("""
             CREATE TABLE IF NOT EXISTS custom_tools (
                 design_name TEXT PRIMARY KEY,
@@ -310,7 +308,6 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # Seed default tools if empty
         cursor = conn.cursor()
         cursor.execute("SELECT count(*) as cnt FROM custom_tools")
         if cursor.fetchone()["cnt"] == 0:
@@ -323,7 +320,6 @@ def init_db():
 
 
 def get_all_tools() -> Dict[str, dict]:
-    """Retrieves all tools (built-in + dynamically discovered) from SQLite."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT design_name, tool_data FROM custom_tools ORDER BY rowid ASC")
@@ -332,7 +328,6 @@ def get_all_tools() -> Dict[str, dict]:
 
 
 def save_discovered_tool(design_name: str, tool_obj: dict):
-    """Saves a newly discovered appraisal tool into SQLite so it permanently stays in the dropdown."""
     with get_connection() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO custom_tools (design_name, tool_data) VALUES (?, ?)",
@@ -396,7 +391,7 @@ def delete_appraisal(appraisal_id: int):
 
 
 # ==========================================
-# 3. EXTRACTION, HEURISTICS & AUTO-TOOL DISCOVERY
+# 2. EXTRACTION, CHECKSUM & PROCESSING ENGINE
 # ==========================================
 def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     try:
@@ -427,7 +422,6 @@ def extract_text_from_url(url: str) -> str:
 
 
 def classify_study_design_heuristically(text: str) -> str:
-    """Scans up to 12,000 characters to reliably catch Abstract and Methods."""
     header_text = text[:12000].lower()
 
     if any(re.search(p, header_text) for p in [
@@ -465,7 +459,6 @@ def classify_study_design_heuristically(text: str) -> str:
     ]):
         return "Diagnostic Accuracy Study"
 
-    # Robust Observational and Comparative detection
     if any(re.search(p, header_text) for p in [
         r"retrospective\s+comparative",
         r"comparative\s+study",
@@ -508,7 +501,6 @@ def classify_study_design_heuristically(text: str) -> str:
     ]):
         return "Narrative Review"
 
-    # Signal for automated discovery if unclassified
     return "🔍 Auto-Detect & Discover Tool (If not in list)"
 
 
@@ -688,13 +680,9 @@ def format_harvard_filename(data: dict, extension: str) -> str:
 
 
 # ==========================================
-# 4. DISCOVERY & EXECUTION ENGINES
+# 3. DISCOVERY & EXECUTION ENGINES
 # ==========================================
 def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str, dict]:
-    """
-    Analyzes the study methodology, determines the internationally recognized gold-standard
-    critical appraisal tool, builds its domain questions and scoring rules, and returns it.
-    """
     discovery_instruction = """
     You are an expert academic epidemiologist and research methodologist.
     Examine the provided text from a research manuscript.
@@ -740,7 +728,6 @@ def execute_manuscript_evaluation(
     active_tools_map: Optional[dict] = None,
     strictness_mode: str = "Strict (Zero Benefit of Doubt)",
 ) -> dict:
-    # Resolve tool taxonomy
     if assigned_design and active_tools_map and assigned_design in active_tools_map:
         active_tool_taxonomy = {assigned_design: active_tools_map[assigned_design]}
     else:
@@ -856,8 +843,48 @@ def execute_manuscript_evaluation(
     raise last_error
 
 
+def answer_interrogation_query(
+    client: genai.Client,
+    query: str,
+    appraisal_json: dict,
+    raw_manuscript_text: str,
+    chat_history: List[dict]
+) -> str:
+    """Answers auditor questions about the appraisal report and manuscript text."""
+    history_context = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in chat_history[-6:]])
+    
+    chat_instruction = f"""
+    You are an objective methodological audit assistant.
+    The user is interrogating the critical appraisal report and the source manuscript.
+    
+    YOUR OBJECTIVES:
+    1. Answer queries directly, citing specific sections, page locations, and verbatim quotes.
+    2. If the user asks whether a score is justified, cite the evidence from the manuscript and the appraisal rubric.
+    3. If the user points out a potential error or missed text, cross-examine the manuscript excerpt and state clearly whether the appraisal appears correct or if a discrepancy exists.
+    4. Maintain an objective, neutral tone. Do NOT mention any external AI models, system brands, or background technology.
+    
+    APPRAISAL REPORT JSON:
+    {json.dumps(appraisal_json, indent=1)}
+    
+    SOURCE MANUSCRIPT TEXT:
+    {raw_manuscript_text[:25000]}
+    """
+    
+    prompt = f"PRIOR CONVERSATION:\n{history_context}\n\nUSER QUESTION: {query}\n\nProvide a clear, evidence-based response."
+    
+    response = client.models.generate_content(
+        model="gemini-3.5-flash-lite",
+        contents=[prompt],
+        config=types.GenerateContentConfig(
+            system_instruction=chat_instruction,
+            temperature=0.1,
+        )
+    )
+    return response.text
+
+
 # ==========================================
-# 5. WORD (.docx) & PDF EXPORT ENGINES
+# 4. WORD (.docx) & PDF EXPORT ENGINES
 # ==========================================
 def set_cell_background(cell, fill_hex: str):
     shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
@@ -1091,6 +1118,15 @@ def build_docx_report(data: dict) -> io.BytesIO:
     full_name = tool_meta.get("full_name") or "Standard Critical Appraisal Instrument"
     purpose = tool_meta.get("purpose") or "Standardized epidemiological instrument used to assess bias and study rigour."
     scoring_rules = tool_meta.get("scoring_rules") or "Standard qualitative rating or numerical score threshold."
+
+    design_match = SEED_TAXONOMY.get(data.get("study_design", ""))
+    if design_match:
+        if not full_name or full_name == "Standard Critical Appraisal Instrument":
+            full_name = design_match.get("full_name", full_name)
+        if not purpose or "Standardized epidemiological" in purpose:
+            purpose = design_match.get("purpose", purpose)
+        if not scoring_rules or "Standard qualitative" in scoring_rules:
+            scoring_rules = design_match.get("scale", scoring_rules)
 
     app_table = doc.add_table(rows=4, cols=2)
     app_table.style = "Table Grid"
@@ -1362,7 +1398,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
 
 
 # ==========================================
-# 6. STREAMLIT APP & SECURITY GATE
+# 5. STREAMLIT APP & SECURITY GATE
 # ==========================================
 st.set_page_config(page_title=APP_NAME, page_icon="📑", layout="wide")
 init_db()
@@ -1408,6 +1444,12 @@ api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None
 
 if "history_limit" not in st.session_state:
     st.session_state["history_limit"] = 10
+
+if "chat_history" not in st.session_state:
+    st.session_state["chat_history"] = []
+
+if "raw_paper_text" not in st.session_state:
+    st.session_state["raw_paper_text"] = ""
 
 with st.sidebar:
     st.header("⚙️ Configuration")
@@ -1467,6 +1509,7 @@ with st.sidebar:
                 with c_load:
                     if st.button("View", key=f"view_{r['id']}", use_container_width=True):
                         st.session_state["appraisal_data"] = get_appraisal_by_id(r["id"])
+                        st.session_state["chat_history"] = []
                         st.rerun()
                 with c_del:
                     if st.button("🗑️", key=f"del_{r['id']}", use_container_width=True):
@@ -1501,6 +1544,7 @@ with tab_pdf:
             paper_text = extract_text_from_pdf_bytes(raw_pdf_bytes)
 
         if paper_text:
+            st.session_state["raw_paper_text"] = paper_text
             st.success(
                 f"⚡ Parsed text successfully ({len(paper_text):,} characters extracted)"
             )
@@ -1519,12 +1563,12 @@ with tab_url:
             with st.spinner("Retrieving article text..."):
                 try:
                     paper_text = extract_text_from_url(url_input.strip())
+                    st.session_state["raw_paper_text"] = paper_text
                     filename_tag = "Web_Article"
                     st.success(f"Retrieved {len(paper_text):,} characters from link.")
                 except Exception as e:
                     st.error(f"Failed to fetch content: {str(e)}")
 
-# Load persistent tools from SQLite
 active_tools = get_all_tools()
 available_designs = list(active_tools.keys()) + ["🔍 Auto-Detect & Discover Tool (If not in list)"]
 
@@ -1561,7 +1605,6 @@ if st.button("⚡ Run Methodological Appraisal", type="primary"):
         
         target_design = selected_design
 
-        # DYNAMIC DISCOVERY STEP: If Auto-Detect is selected or design isn't in database
         if target_design == "🔍 Auto-Detect & Discover Tool (If not in list)":
             with st.spinner("Analyzing methodology to discover gold-standard appraisal tool..."):
                 try:
@@ -1569,7 +1612,6 @@ if st.button("⚡ Run Methodological Appraisal", type="primary"):
                     discovered_name, discovered_tool = discover_appraisal_tool(client, sample)
                     save_discovered_tool(discovered_name, discovered_tool)
                     target_design = discovered_name
-                    # Reload tools map with new discovery
                     active_tools = get_all_tools()
                     st.info(f"✨ Discovered and saved new framework: **{discovered_tool.get('tool')}** for *{discovered_name}*")
                 except Exception as e:
@@ -1593,6 +1635,7 @@ if st.button("⚡ Run Methodological Appraisal", type="primary"):
                 
                 new_id = save_appraisal(verified_data, filename_tag)
                 st.session_state["appraisal_data"] = verified_data
+                st.session_state["chat_history"] = []
                 
                 chk_msg = "PASSED" if verified_data.get("checksum_passed") else "REVIEW REQUIRED"
                 st.success(f"Appraisal finished and saved (ID: #{new_id})! Groundedness: {score}% | Checksum: {chk_msg}")
@@ -1698,7 +1741,7 @@ if "appraisal_data" in st.session_state:
             st.markdown(f"**Purpose:** {tool_meta.get('purpose')}")
             st.markdown(f"**Scoring Metric:** {tool_meta.get('scoring_rules')}")
 
-    # Build Harvard Short Citation Filename: [Author]_[Year]_[Tool]_KAT.[ext]
+    # Export Documents (Word & PDF)
     harvard_docx_name = format_harvard_filename(data, "docx")
     harvard_pdf_name = format_harvard_filename(data, "pdf")
 
@@ -1723,3 +1766,42 @@ if "appraisal_data" in st.session_state:
             mime="application/pdf",
             use_container_width=True,
         )
+
+    # ==========================================
+    # 6. INTERACTIVE AUDIT ASSISTANT (CHAT BOX)
+    # ==========================================
+    st.markdown("---")
+    st.subheader("💬 Appraisal Interrogation & Audit Assistant")
+    st.caption("Ask questions about specific scores, check line/page citations, or flag methodological discrepancies.")
+
+    # Render ongoing chat history
+    for msg in st.session_state["chat_history"]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # Chat prompt input
+    if user_query := st.chat_input("Ask a question about this appraisal or paper (e.g. 'Where is blinding mentioned?', 'Why was domain 3 penalized?')..."):
+        if not api_key:
+            st.error("Please ensure your validation credential key is entered in the sidebar.")
+        else:
+            # Display user message
+            st.session_state["chat_history"].append({"role": "user", "content": user_query})
+            with st.chat_message("user"):
+                st.markdown(user_query)
+
+            # Generate and stream response
+            client = genai.Client(api_key=api_key)
+            with st.chat_message("assistant"):
+                with st.spinner("Reviewing manuscript citations and appraisal data..."):
+                    try:
+                        reply = answer_interrogation_query(
+                            client,
+                            query=user_query,
+                            appraisal_json=data,
+                            raw_manuscript_text=st.session_state.get("raw_paper_text", ""),
+                            chat_history=st.session_state["chat_history"]
+                        )
+                        st.markdown(reply)
+                        st.session_state["chat_history"].append({"role": "assistant", "content": reply})
+                    except Exception as err:
+                        st.error(f"Failed to interrogate report: {err}")
