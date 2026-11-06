@@ -144,7 +144,7 @@ TOOL_TAXONOMY = {
                 "question": "Did the funding body influence guideline content, and were competing interests of development group members recorded and addressed?",
             },
         ],
-        "scale": "1 (Strongly Disagree / Absent) to 7 (Strongly Agree / Exemplary). Overall domain scores are calculated as standardized percentages. >70% indicates high quality.",
+        "scale": "1 (Strongly Disagree / Absent) to 7 (Strongly Agree / Exemplary). Standard: 1 = No information / poor reporting; 4 = Moderate; 7 = Methodologically flawless. Standardized domain % >= 70% required for high quality.",
     },
     "Randomized Controlled Trial (RCT)": {
         "tool": "Cochrane RoB 2",
@@ -153,26 +153,26 @@ TOOL_TAXONOMY = {
         "domains": [
             {
                 "name": "Domain 1: Bias arising from the randomization process",
-                "question": "Was the allocation sequence random, concealed until assignment, and were baseline differences balanced across groups?",
+                "question": "Was the allocation sequence truly random, centralized/concealed until assignment, and were baseline prognostic variables balanced across groups?",
             },
             {
                 "name": "Domain 2: Bias due to deviations from intended interventions",
-                "question": "Were participants and caregivers aware of assignments, and did any non-protocol deviations occur that were unbalanced between groups?",
+                "question": "Were participants and caregivers blinded, and was an Intention-to-Treat (ITT) or modified ITT analysis performed to account for non-adherence?",
             },
             {
                 "name": "Domain 3: Bias due to missing outcome data",
-                "question": "Were data for this outcome available for nearly all participants randomized, and is there evidence that missingness depends on true values?",
+                "question": "Were outcome data complete for >95% of randomized participants, or is there evidence that attrition was balanced and non-informative?",
             },
             {
                 "name": "Domain 4: Bias in measurement of the outcome",
-                "question": "Was the outcome assessor blinded, was the measurement method appropriate, and could assessment have been influenced by knowledge of intervention?",
+                "question": "Was the outcome assessor fully blinded to group assignment, and was the measurement instrument objective and validated?",
             },
             {
                 "name": "Domain 5: Bias in selection of the reported result",
-                "question": "Was the study analyzed in accordance with a pre-specified plan/protocol registered before unblinded data became available?",
+                "question": "Was the trial registered prospectively in a registry (e.g. ClinicalTrials.gov) with an analysis plan finalized prior to unblinded analysis?",
             },
         ],
-        "scale": "Low Risk of Bias | Some Concerns | High Risk of Bias. The overall risk of bias judgment matches the highest risk assessed in any individual domain.",
+        "scale": "Low Risk of Bias | Some Concerns | High Risk of Bias. CRITICAL: A single High Risk domain automatically mandates an overall High Risk rating. A single domain with Some Concerns prevents an overall Low Risk rating.",
     },
     "Non-Randomized Intervention / Quasi-Experimental": {
         "tool": "ROBINS-I",
@@ -181,34 +181,34 @@ TOOL_TAXONOMY = {
         "domains": [
             {
                 "name": "Domain 1: Bias due to Confounding",
-                "question": "Did the authors adequately control for baseline and time-varying confounding using appropriate design or adjustment?",
+                "question": "Did the authors adequately measure and statistically adjust for all critical baseline and time-varying confounders?",
             },
             {
                 "name": "Domain 2: Bias in Selection of participants",
-                "question": "Was participant selection into the study related to both intervention and outcome?",
+                "question": "Was participant selection into the cohort free from immortal time bias and independent of intervention status/outcome?",
             },
             {
                 "name": "Domain 3: Classification of interventions",
-                "question": "Were intervention status and exposure definitions clearly and objectively defined without misclassification?",
+                "question": "Were intervention definitions clearly documented prospectively without misclassification or post-hoc assignment?",
             },
             {
                 "name": "Domain 4: Deviations from intended interventions",
-                "question": "Were there systematic deviations from intended interventions arising because of the experimental context?",
+                "question": "Were there systematic deviations from intended interventions or co-interventions unbalanced between groups?",
             },
             {
                 "name": "Domain 5: Missing data",
-                "question": "Were outcome data complete, or were missing data handled with robust sensitivity/imputation analyses?",
+                "question": "Were attrition rates documented with sensitivity analyses or multiple imputation accounting for missing observations?",
             },
             {
                 "name": "Domain 6: Measurement of outcomes",
-                "question": "Were outcome assessors blinded, and were outcome measures valid, reliable, and applied equally?",
+                "question": "Were outcome assessors blinded to exposure status, and were outcomes validated against clinical criteria?",
             },
             {
                 "name": "Domain 7: Selection of the reported result",
-                "question": "Are reported results free from selective outcome or analysis reporting based on statistical significance?",
+                "question": "Are published results consistent with a pre-registered protocol without selective reporting of significant p-values?",
             },
         ],
-        "scale": "Low Risk | Moderate Risk | Serious Risk | Critical Risk | No Information.",
+        "scale": "Low Risk | Moderate Risk | Serious Risk | Critical Risk | No Information. A single Critical Risk domain mandates an overall Critical Risk.",
     },
     "Systematic Review / Meta-Analysis": {
         "tool": "AMSTAR 2",
@@ -216,39 +216,39 @@ TOOL_TAXONOMY = {
         "purpose": "Critically appraises systematic reviews that evaluate randomized or non-randomized studies of healthcare interventions.",
         "domains": [
             {
-                "name": "Domain 1: PICO & Protocol Pre-registration",
-                "question": "Did the review question and inclusion criteria include components of PICO, and was a protocol established and registered prior to conducting the review?",
+                "name": "Domain 1: PICO & Protocol Pre-registration (Critical Domain)",
+                "question": "Did the review establish a formal PICO question AND register the protocol prospectively (e.g., PROSPERO) prior to screening?",
             },
             {
-                "name": "Domain 2: Comprehensive Literature Search Strategy",
-                "question": "Did the authors search at least two databases, provide keywords/search strategies, search trial registries, and review reference lists?",
+                "name": "Domain 2: Comprehensive Literature Search Strategy (Critical Domain)",
+                "question": "Did the authors search >=2 databases, provide full boolean search strings, search trial registries, and review grey literature?",
             },
             {
                 "name": "Domain 3: Duplicate Study Selection & Extraction",
-                "question": "Did at least two authors independently screen titles, abstracts, and full texts, and extract study data?",
+                "question": "Did at least two reviewers independently screen titles, abstracts, and full texts with documented consensus agreement?",
             },
             {
-                "name": "Domain 4: Excluded Studies Justification",
-                "question": "Did the authors provide a comprehensive list of potentially relevant excluded studies along with explicit reasons for each exclusion?",
+                "name": "Domain 4: Excluded Studies Justification (Critical Domain)",
+                "question": "Did the authors provide a full bibliographic list of potentially relevant excluded studies along with explicit reasons for each exclusion?",
             },
             {
-                "name": "Domain 5: Primary Study RoB Assessment",
-                "question": "Did the authors apply a recognized, formal risk of bias tool to primary included studies?",
+                "name": "Domain 5: Primary Study RoB Assessment (Critical Domain)",
+                "question": "Did the review apply an established, validated risk of bias tool (RoB 2, ROBINS-I) to all included primary studies?",
             },
             {
-                "name": "Domain 6: Meta-Analytic Synthesis Appropriateness",
-                "question": "If quantitative synthesis was performed, were statistical pooling methods justified and investigated for heterogeneity?",
+                "name": "Domain 6: Meta-Analytic Synthesis Appropriateness (Critical Domain)",
+                "question": "If statistical pooling was performed, were random-effects models justified and statistical heterogeneity (I^2, Chi^2) explicitly investigated?",
             },
             {
-                "name": "Domain 7: Publication Bias Assessment",
-                "question": "Did the authors investigate publication bias (funnel plots, Egger's test) and discuss its likely clinical impact?",
+                "name": "Domain 7: Publication Bias Assessment (Critical Domain)",
+                "question": "Did the authors formally test for small-study effects/publication bias (funnel plots, Egger's test) for comparisons with >=10 studies?",
             },
             {
                 "name": "Domain 8: Conflict of Interest & Funding Reporting",
-                "question": "Did the authors report their funding sources and any conflicts of interest, as well as the funding sources of primary studies?",
+                "question": "Did the authors report their own funding/COIs AND the funding sources of primary studies included in the review?",
             },
         ],
-        "scale": "High Confidence (No or one non-critical weakness) | Moderate Confidence (More than one non-critical weakness) | Low Confidence (One critical flaw) | Critically Low Confidence (More than one critical flaw).",
+        "scale": "High Confidence (0-1 non-critical flaw) | Moderate Confidence (>1 non-critical flaw) | Low Confidence (1 critical flaw) | Critically Low Confidence (>1 critical flaw).",
     },
     "Observational Study (Cohort or Case-Control)": {
         "tool": "Newcastle-Ottawa Scale (NOS) / CASP",
@@ -257,18 +257,18 @@ TOOL_TAXONOMY = {
         "domains": [
             {
                 "name": "Domain 1: Selection of Cohorts / Cases",
-                "question": "Are the study cohorts truly representative, cases clearly defined, and exposure ascertainment secured via objective records?",
+                "question": "Are the study cohorts truly representative of community cases, and was exposure ascertained from secure objective records rather than self-report?",
             },
             {
                 "name": "Domain 2: Comparability of Groups",
-                "question": "Did the study design or statistical model adjust for the primary confounder and additional relevant covariates?",
+                "question": "Did the multivariable statistical model control for the primary potential confounder AND additional predefined covariates?",
             },
             {
                 "name": "Domain 3: Ascertainment of Exposure and Outcome",
-                "question": "Was outcome assessment blinded or independent, with follow-up long and complete enough for meaningful conclusions?",
+                "question": "Was outcome assessment blinded or derived from linkage records, with follow-up long enough (>80% retained)?",
             },
         ],
-        "scale": "Stars awarded (0 to 9 stars total): Good Quality (7-9 stars) | Fair Quality (4-6 stars) | Poor Quality (0-3 stars).",
+        "scale": "0 to 9 Stars: Good Quality (7-9 stars) | Fair Quality (4-6 stars) | Poor Quality (0-3 stars). Do not award stars without explicit textual evidence.",
     },
     "Diagnostic Accuracy Study": {
         "tool": "QUADAS-2",
@@ -277,22 +277,22 @@ TOOL_TAXONOMY = {
         "domains": [
             {
                 "name": "Domain 1: Patient Selection",
-                "question": "Was a consecutive or random sample of patients enrolled, and was inappropriate exclusion avoided?",
+                "question": "Was a consecutive or random sample enrolled without case-control sampling or inappropriate exclusions?",
             },
             {
                 "name": "Domain 2: Index Test Execution & Interpretation",
-                "question": "Were index test results interpreted without knowledge of the reference standard, and with a pre-specified threshold?",
+                "question": "Were index test results interpreted completely blinded to the reference standard, with a pre-specified diagnostic cutoff?",
             },
             {
                 "name": "Domain 3: Reference Standard Validity",
-                "question": "Is the reference standard likely to correctly classify the target condition, and interpreted without knowledge of the index test?",
+                "question": "Is the reference standard the true gold standard, and was it interpreted blinded to the index test result?",
             },
             {
                 "name": "Domain 4: Flow and Timing",
-                "question": "Was there an appropriate interval between index test and reference standard, and did all patients receive the same reference test?",
+                "question": "Was the time interval between index and reference tests appropriate, and did all patients receive the verified reference standard?",
             },
         ],
-        "scale": "Low Risk | High Risk | Unclear Risk across bias and applicability domains.",
+        "scale": "Low Risk | High Risk | Unclear Risk. If details are not reported, score as Unclear or High Risk; never assume Low Risk.",
     },
     "Narrative Review": {
         "tool": "SANRA",
@@ -301,30 +301,30 @@ TOOL_TAXONOMY = {
         "domains": [
             {
                 "name": "Domain 1: Justification of article's importance",
-                "question": "Is the scientific or clinical importance of the review justified and contextualized?",
+                "question": "Is the clinical or scientific rationale explicitly justified with background epidemiology?",
             },
             {
                 "name": "Domain 2: Statement of concrete aims",
-                "question": "Does the article formulate explicit, concrete questions or aims?",
+                "question": "Does the manuscript state explicit questions or testable objective hypotheses?",
             },
             {
                 "name": "Domain 3: Description of the literature search",
-                "question": "Is the literature search methodology transparently described (databases, search terms, restrictions)?",
+                "question": "Are search terms, databases used, and search date restrictions transparently described?",
             },
             {
                 "name": "Domain 4: Referencing of primary literature",
-                "question": "Are arguments and assertions referenced with original primary evidence rather than non-systematic reviews?",
+                "question": "Are key claims substantiated by original experimental studies rather than tertiary opinion reviews?",
             },
             {
                 "name": "Domain 5: Scientific reasoning and balanced presentation",
-                "question": "Does the review present evidence impartially and discuss contradictory findings?",
+                "question": "Does the review present contradictory findings and neutral debate without author advocacy bias?",
             },
             {
                 "name": "Domain 6: Presentation of relevant data",
-                "question": "Are relevant endpoint data, clinical trial outcomes, and effect sizes synthesized in clear tables or charts?",
+                "question": "Are numerical endpoint outcome values, trial sample sizes, and comparative effect estimates synthesized in tables?",
             },
         ],
-        "scale": "0 to 2 per item (Maximum score 12). >=9/12 indicates a high-standard narrative review.",
+        "scale": "0 = Not Met | 1 = Partially Met | 2 = Met. Total score out of 12 (>=9 required for high quality).",
     },
     "Qualitative Study": {
         "tool": "CASP Qualitative / COREQ",
@@ -333,30 +333,30 @@ TOOL_TAXONOMY = {
         "domains": [
             {
                 "name": "Domain 1: Research design appropriateness",
-                "question": "Is qualitative methodology appropriate for addressing the research goal?",
+                "question": "Is qualitative inquiry explicitly justified over quantitative measurement for this research question?",
             },
             {
                 "name": "Domain 2: Sampling and recruitment strategy",
-                "question": "Was the recruitment strategy appropriate to the aims, and were non-participants explained?",
+                "question": "Was theoretical/purposive sampling described, and were reasons for participant refusal/drop-out explained?",
             },
             {
                 "name": "Domain 3: Data collection and reflexivity",
-                "question": "Did the researchers critically examine their own role, potential bias, and influence during data collection?",
+                "question": "Did the investigators critically evaluate researcher positionality, potential bias, and interaction effects with participants?",
             },
             {
                 "name": "Domain 4: Ethical considerations addressed",
-                "question": "Were ethical approval, consent procedures, and confidentiality explicitly secured?",
+                "question": "Were ethics committee approval, informed consent, and data anonymization explicitly reported?",
             },
             {
                 "name": "Domain 5: Rigour and depth of data analysis",
-                "question": "Was the analytic process rigorous (e.g., thematic analysis, saturation, duplicate coding)?",
+                "question": "Was thematic saturation verified, and was duplicate independent coding or member checking conducted?",
             },
             {
                 "name": "Domain 6: Clear statement of findings and value",
-                "question": "Are findings clearly stated, substantiated by participant quotes, and clinically valuable?",
+                "question": "Are emergent themes backed by direct participant quotes with contextualized clinical applicability?",
             },
         ],
-        "scale": "Yes | Can't Tell | No across 10 structured appraisal questions.",
+        "scale": "Yes | Can't Tell | No. Standard: 'Can't Tell' or 'No' must be chosen whenever reporting is ambiguous.",
     },
 }
 
@@ -533,13 +533,6 @@ def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.82) -> 
 def run_comprehensive_checksum(
     data: dict, full_raw_text: str, fuzzy_threshold: float = 0.82
 ) -> Tuple[dict, float, List[str], List[str]]:
-    """
-    Robust deterministic Python checksum:
-    1. Verifies verbatim quotes via sliding fuzzy token matching.
-    2. Checks for methodological contradictions (e.g. Green tier assigned despite high-risk domain).
-    3. Checks for architectural signals (e.g. RCT claims vs. randomization in text).
-    4. Audits empty evidence strings.
-    """
     grounding_warnings: List[str] = []
     flaw_warnings: List[str] = []
 
@@ -550,7 +543,7 @@ def run_comprehensive_checksum(
     if not domains:
         return data, 100.0, [], ["No domain appraisals populated."]
 
-    # --- CHECK 1: Evidence Groundedness Verification ---
+    # 1. Groundedness Verification
     verified_count = 0
     for d in domains:
         quote = d.get("verbatim_evidence", "").strip()
@@ -578,29 +571,31 @@ def run_comprehensive_checksum(
 
     grounded_score = round((verified_count / len(domains)) * 100, 1)
 
-    # --- CHECK 2: Critical Methodological Contradiction Check ---
+    # 2. Strict Methodological Contradiction Check
     tier = str(data.get("quality_tier", "")).upper()
     overall_verdict = str(data.get("overall_verdict", "")).lower()
 
-    # If categorized as Green/Robust, verify that no domain is scored as high risk
     has_high_risk_domain = False
     for d in domains:
         rating_str = str(d.get("rating", "")).lower()
-        if any(term in rating_str for term in ["high risk", "serious risk", "critical risk", "critically low", "score 0", "1/7"]):
+        if any(term in rating_str for term in [
+            "high risk", "serious risk", "critical risk", "critically low", 
+            "score 0", "score 1", "score 2/7", "score 1/7", "poor quality"
+        ]):
             has_high_risk_domain = True
             break
 
     if "GREEN" in tier and has_high_risk_domain:
         flaw_warnings.append(
-            "Methodological Contradiction: Overall Tier assigned as 'GREEN' (Robust), but at least one core domain is flagged as High/Critical Risk."
+            "Methodological Contradiction: Overall Tier assigned as 'GREEN' (Robust), but at least one domain contains a critical/high risk judgment."
         )
 
-    if any(good in overall_verdict for good in ["low risk", "recommended", "high quality"]) and has_high_risk_domain:
+    if any(good in overall_verdict for good in ["low risk", "recommended", "high quality", "high confidence"]) and has_high_risk_domain:
         flaw_warnings.append(
-            "Verdict Conflict: Overall verdict states Low Risk/High Quality, but critical domain deficits were detected."
+            "Verdict Conflict: Overall verdict states Low Risk/High Quality despite identified high-risk domain deficiencies."
         )
 
-    # --- CHECK 3: Study Architecture Alignment Check ---
+    # 3. Architectural Alignment Check
     design = str(data.get("study_design", "")).lower()
     text_sample = full_raw_text[:12000].lower()
 
@@ -608,22 +603,16 @@ def run_comprehensive_checksum(
         term in text_sample for term in ["random", "trial", "allocation", "rct", "group"]
     ):
         flaw_warnings.append(
-            "Design Alert: Classified as an RCT, but standard randomization/allocation terms are missing in the initial text."
+            "Design Alert: Classified as an RCT, but standard randomization terms are absent in the initial text."
         )
     elif "systematic review" in design and not any(
         term in text_sample for term in ["systematic", "meta-analysis", "search", "prisma", "pubmed", "cochrane", "databases"]
     ):
         flaw_warnings.append(
-            "Design Alert: Classified as Systematic Review, but systematic search/PRISMA terms are missing in the initial text."
-        )
-    elif "clinical practice guideline" in design and not any(
-        term in text_sample for term in ["guideline", "recommendation", "consensus", "panel", "practice"]
-    ):
-        flaw_warnings.append(
-            "Design Alert: Classified as Guideline/Consensus, but clinical recommendation terms are sparse in the header."
+            "Design Alert: Classified as Systematic Review, but systematic search/PRISMA terms are missing in the text."
         )
 
-    # --- CHECK 4: Empty Evidence Audit ---
+    # 4. Evidence Gap Audit
     empty_evidence_domains = [
         d.get("domain_name") for d in domains if not str(d.get("verbatim_evidence", "")).strip()
     ]
@@ -632,7 +621,6 @@ def run_comprehensive_checksum(
             f"Evidence Gap: Missing verbatim citations in: {', '.join(empty_evidence_domains[:3])}."
         )
 
-    # Populate final verification dictionary
     data["groundedness_score"] = grounded_score
     data["groundedness_warnings"] = grounding_warnings
     data["checksum_flaws"] = flaw_warnings
@@ -646,6 +634,7 @@ def execute_manuscript_evaluation(
     text_content: Optional[str] = None,
     raw_pdf_bytes: Optional[bytes] = None,
     assigned_design: Optional[str] = None,
+    strictness_mode: str = "Strict (Zero Benefit of Doubt)",
 ) -> dict:
     if assigned_design and assigned_design in TOOL_TAXONOMY:
         active_tool_taxonomy = {assigned_design: TOOL_TAXONOMY[assigned_design]}
@@ -654,32 +643,35 @@ def execute_manuscript_evaluation(
 
     taxonomy_json = json.dumps(active_tool_taxonomy, indent=2)
 
+    # Epistemological instruction enforcing strict adherence to appraisal standards
     system_instruction = f"""
-    You are an expert epidemiological reviewer and methodological appraiser.
-    Evaluate the provided research paper or clinical guideline and perform a critical appraisal.
+    You are an unyielding, rigorous epidemiological auditor and methodological quality adjudicator.
+    You evaluate research manuscripts with ZERO benefit of the doubt.
+    STRICT COMPLIANCE MANDATE: You must apply the exact methodological standards dictated by each appraisal framework.
 
-    Appraisal Tool Assigned:
+    Appraisal Framework & Rubrics:
     {taxonomy_json}
 
-    Step-by-Step Instructions:
-    1. Bibliographic Extraction:
-       - Extract the paper's exact 'paper_title'.
-       - Extract 'authors' (e.g., "Smith JA, Doe B, et al.").
-       - Extract 'journal' (journal name, or 'Unspecified').
-       - Extract 'year_published' (e.g., "2024").
-       - Extract 'doi' (e.g., "10.1016/j.math.2023...").
-    2. Confirm Study Design: The paper has been pre-classified as '{assigned_design if assigned_design else 'Auto-detect'}'. Confirm and apply the corresponding Gold-Standard Tool.
-    3. Tool Assignment: Evaluate EVERY domain and question listed for this assigned tool.
-    4. Grounded Evidence Extraction:
-       - Include the exact 'evaluation_question' as provided in the taxonomy.
-       - Extract the EXACT 'verbatim_evidence' directly word-for-word from the text.
-       - Provide the exact 'location_reference' (e.g., "[Page 4] Methods §Randomization").
-       - Provide an analytical 'critique' justifying the score/rating.
-    5. Categorize 'quality_tier' into exactly one of: "GREEN", "YELLOW", or "RED".
-       - "GREEN": Methodologically robust, low risk of bias, high clinical relevance and validity.
-       - "YELLOW": Moderate quality, some methodological concerns, fair clinical applicability.
-       - "RED": High risk of bias, critical flaws, weak validity, or poor applicability.
-    6. Return full 'tool_meta' (acronym, full_name, purpose, scoring_rules).
+    OPERATIONAL AUDIT RULES:
+    1. THE ABSENCE OF REPORTING IS THE PRESENCE OF BIAS:
+       - If authors fail to explicitly report allocation concealment methods, assume concealment was inadequate.
+       - If blinding of outcome assessors is not stated, assume assessments were unblinded.
+       - If trial registration (e.g., ClinicalTrials.gov, PROSPERO) is absent or occurred retrospectively after enrollment began, the paper MUST receive a negative or High Risk rating for reporting bias.
+       - NEVER assume good clinical or research practice occurred unless substantiated word-for-word in the text.
+    2. SCORING INTEGRITY:
+       - Do NOT be polite, generous, or lenient.
+       - In Cochrane RoB 2: If even ONE domain is High Risk, the overall risk of bias CANNOT be Low Risk or Some Concerns; it must be 'High Risk'.
+       - In AMSTAR 2: A deficit in even ONE critical domain (Protocol registration, Comprehensive search, Excluded studies list, Risk of bias assessment, Appropriate meta-analytic methods, Publication bias) drops confidence to 'Low' or 'Critically Low'.
+       - In AGREE II: Score 1 (Strongly Disagree) whenever an item is omitted. Only score 6-7 if the guideline provides exemplary, transparent, audited evidence.
+    3. MANDATORY GROUNDED EVIDENCE:
+       - For every single domain, provide the EXACT verbatim quote extracted directly from the paper.
+       - If an item was NOT reported in the manuscript, explicitly state 'Not reported in text' as verbatim evidence, provide the section searched, and penalize the score accordingly.
+    4. QUALITY TIER DETERMINATION:
+       - "GREEN": Truly robust, low risk across ALL primary domains, prospective registration confirmed, comprehensive reporting.
+       - "YELLOW": Moderate quality, some concerns, or minor reporting limitations without fatal structural bias.
+       - "RED": High risk of bias, critical methodological flaws, lack of registration, unadjusted confounding, or fatal attrition.
+
+    Audit Strictness Level: {strictness_mode.upper()}
 
     CRITICAL: Output ONLY a valid JSON object matching this schema:
     {{
@@ -692,7 +684,7 @@ def execute_manuscript_evaluation(
       "appraisal_tool_selected": "Name of appraisal tool",
       "quality_tier": "GREEN / YELLOW / RED",
       "overall_verdict": "Low Risk / Moderate Risk / High Risk / Recommended / etc.",
-      "overall_synthesis": "Comprehensive narrative explaining methodological quality and clinical applicability.",
+      "overall_synthesis": "Rigorous narrative detailing specific methodological vulnerabilities and risk of bias.",
       "tool_meta": {{
         "acronym": "Tool Acronym",
         "full_name": "Full Tool Name",
@@ -705,8 +697,8 @@ def execute_manuscript_evaluation(
           "evaluation_question": "The appraisal question evaluated",
           "rating": "Score or Rating",
           "location_reference": "Section or Page number reference",
-          "verbatim_evidence": "Direct quote from text",
-          "critique": "Analytical rationale for this domain"
+          "verbatim_evidence": "Direct quote from text or 'Not reported in text'",
+          "critique": "Uncompromising analytical rationale justifying why the score was penalized or awarded"
         }}
       ]
     }}
@@ -717,14 +709,14 @@ def execute_manuscript_evaluation(
     contents = []
     if clean_text and len(clean_text.strip()) > 150:
         contents.append(
-            f"PAPER CONTENT:\n{clean_text}\n\nPerform the full critical appraisal and return the JSON object."
+            f"PAPER CONTENT:\n{clean_text}\n\nExecute the rigorous critical appraisal without benefit of doubt and return the JSON object."
         )
     elif raw_pdf_bytes:
         contents.append(
             types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf")
         )
         contents.append(
-            f"Perform the critical appraisal for {assigned_design} and return the JSON object."
+            f"Execute the rigorous critical appraisal for {assigned_design} without benefit of doubt and return the JSON object."
         )
     else:
         raise ValueError("No valid manuscript text or PDF bytes supplied.")
@@ -747,7 +739,7 @@ def execute_manuscript_evaluation(
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         response_mime_type="application/json",
-                        temperature=0.1,
+                        temperature=0.0,  # 0.0 guarantees deterministic, unyielding rubric enforcement
                     ),
                 )
                 return json.loads(response.text)
@@ -864,7 +856,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
 
     doc.add_paragraph("")
 
-    # Checksum Alerts Section if Flaws Exist
     flaws = data.get("checksum_flaws", [])
     if flaws:
         doc.add_heading("⚠️ Methodological Checksum & Integrity Audit", level=2)
@@ -875,7 +866,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
             r_f.font.color.rgb = RGBColor(170, 30, 30)
         doc.add_paragraph("")
 
-    # Section 1: Detailed Question-by-Question Domain Appraisal
     doc.add_heading(
         f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})",
         level=1,
@@ -1188,7 +1178,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_gauge)
     story.append(Spacer(1, 10))
 
-    # Flaws Warning if any
     flaws = data.get("checksum_flaws", [])
     if flaws:
         story.append(Paragraph("Methodological Flaw & Contradiction Alerts:", h1_style))
@@ -1197,7 +1186,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
             story.append(Spacer(1, 3))
         story.append(Spacer(1, 6))
 
-    # Detailed Domain Table
     story.append(Paragraph(f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})", h1_style))
     domain_table_data = [[
         Paragraph("Domain & Prompt Criterion", table_header_style),
@@ -1227,7 +1215,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_domains)
     story.append(Spacer(1, 12))
 
-    # Executive Synthesis & Scorecard Summary
     story.append(Paragraph("2. Methodological Synthesis & Scorecard Summary", h1_style))
     story.append(Paragraph(f"<b>Executive Synthesis:</b> {data.get('overall_synthesis', '')}", body_style))
     story.append(Spacer(1, 8))
@@ -1265,7 +1252,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(Paragraph(f"<b>Final Determination:</b> <font color='#aa2222'><b>{data.get('overall_verdict', 'N/A')}</b></font>", bold_body_style))
     story.append(Spacer(1, 10))
 
-    # Tool Metadata Reference Table
     story.append(Paragraph("3. Appraisal Framework & Standards Appendix", h1_style))
     tool_meta = data.get("tool_meta", {})
     ref_data = [
@@ -1346,6 +1332,17 @@ with st.sidebar:
         )
     else:
         st.success("Access Credential Verified")
+
+    # Strictness Controller
+    strictness_choice = st.radio(
+        "Adjudication Strictness:",
+        options=[
+            "Strict (Zero Benefit of Doubt)",
+            "Auditor / Forensic (Zero Tolerance)",
+        ],
+        index=0,
+        help="Enforces that missing reporting automatically equals risk of bias, adhering strictly to Cochrane RoB 2, AMSTAR 2, and AGREE II rubrics."
+    )
 
     if st.button("Log Out"):
         st.session_state["authenticated"] = False
@@ -1441,7 +1438,6 @@ with tab_url:
                 except Exception as e:
                     st.error(f"Failed to fetch content: {str(e)}")
 
-# Instant local pattern recognition
 detected_design = "Randomized Controlled Trial (RCT)"
 if paper_text:
     detected_design = classify_study_design_heuristically(paper_text)
@@ -1473,16 +1469,16 @@ if st.button("⚡ Run Methodological Appraisal", type="primary"):
             if (raw_pdf_bytes and not paper_text)
             else "Extracted Text (Normalized)"
         )
-        with st.spinner(f"Evaluating {selected_design} using {mode_label}..."):
+        with st.spinner(f"Evaluating {selected_design} under {strictness_choice}..."):
             try:
                 raw_data = execute_manuscript_evaluation(
                     client,
                     text_content=paper_text,
                     raw_pdf_bytes=raw_pdf_bytes if not paper_text else None,
                     assigned_design=selected_design,
+                    strictness_mode=strictness_choice,
                 )
                 
-                # Run multi-layered checksum (Groundedness + Contradiction + Architecture checks)
                 verified_data, score, grounding_warns, flaw_warns = run_comprehensive_checksum(
                     raw_data, paper_text, fuzzy_threshold=0.82
                 )
@@ -1491,7 +1487,7 @@ if st.button("⚡ Run Methodological Appraisal", type="primary"):
                 st.session_state["appraisal_data"] = verified_data
                 
                 chk_msg = "PASSED" if verified_data.get("checksum_passed") else "REVIEW REQUIRED"
-                st.success(f"Appraisal finished and saved (ID: #{new_id})! Groundedness: {score}% | Status: {chk_msg}")
+                st.success(f"Appraisal finished and saved (ID: #{new_id})! Groundedness: {score}% | Checksum: {chk_msg}")
                 st.rerun()
             except Exception as e:
                 st.error(f"Appraisal failed: {str(e)}")
@@ -1501,7 +1497,6 @@ if "appraisal_data" in st.session_state:
     data = st.session_state["appraisal_data"]
     st.markdown("---")
     
-    # Paper Header & Bibliographic Details
     st.subheader(f"📋 {data.get('paper_title', 'Untitled Manuscript')}")
     
     b1, b2, b3, b4 = st.columns(4)
@@ -1537,19 +1532,16 @@ if "appraisal_data" in st.session_state:
         status_label = "🟢 Passed" if is_passed else "🔴 Review Needed"
         st.metric("Integrity Checksum", f"{chk_score}%", delta=status_label, help="Multi-layered local checksum validating evidence quotes, design alignment, and rating consistency.")
 
-    # Critical Flaws and Contradictions Alert Box
     if data.get("checksum_flaws"):
         st.error("🚨 **Critical Flaw / Inconsistency Alerts Detected:**")
         for flaw in data["checksum_flaws"]:
             st.markdown(f"- **{flaw}**")
 
-    # Unverified Citation Notice
     if data.get("groundedness_warnings"):
         with st.expander("⚠️ Citation Grounding Warnings"):
             for w in data["groundedness_warnings"]:
                 st.write(f"- {w}")
 
-    # Three-Bar Quality Gauge in Streamlit
     tier = str(data.get("quality_tier", "")).upper()
     if "GREEN" not in tier and "YELLOW" not in tier and "RED" not in tier:
         v = str(data.get("overall_verdict", "")).lower()
