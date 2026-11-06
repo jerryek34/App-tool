@@ -1066,7 +1066,6 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(t_meta)
     story.append(Spacer(1, 6))
 
-    # 1. Arithmetic Breakdown Table
     story.append(Paragraph("<b>1. Detailed Mathematical & Scoring Arithmetic</b>", sec_heading))
     arith = deep_dive.get("arithmetic_breakdown", {})
     arith_rows = [
@@ -1085,7 +1084,6 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(t_arith)
     story.append(Spacer(1, 6))
 
-    # 2. Substantive Content Criticisms
     story.append(Paragraph("<b>2. Substantive Content Criticisms & Methodological Vulnerabilities</b>", sec_heading))
     crit_rows = [[Paragraph("Identified Deficit", header_style), Paragraph("Manuscript Empirical Fact / Quote", header_style), Paragraph("Scientific & Epidemiological Impact", header_style)]]
     for c in deep_dive.get("substantive_criticisms", []):
@@ -1105,7 +1103,6 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(t_crit)
     story.append(Spacer(1, 6))
 
-    # 3. Domain Deep Dive (Boilerplate Stripped)
     story.append(Paragraph("<b>3. Domain-Specific Audit (Boilerplate Free)</b>", sec_heading))
     d_rows = [[Paragraph("Domain", header_style), Paragraph("Score", header_style), Paragraph("Direct Empirical Finding in Text", header_style), Paragraph("Identified Design / Statistical Vulnerability", header_style)]]
     for d in deep_dive.get("domain_deep_dives", []):
@@ -1144,7 +1141,6 @@ def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     p_meta.add_run(f"{base_data.get('paper_title')} ({harvard_authors}, {base_data.get('year_published')})\n")
     p_meta.add_run(f"Architecture: {base_data.get('study_design')} | Tool Applied: {base_data.get('appraisal_tool_selected')}\n")
 
-    # 1. Arithmetic Breakdown
     doc.add_heading("1. Mathematical Arithmetic & Score Tally", level=1)
     arith = deep_dive.get("arithmetic_breakdown", {})
     doc.add_paragraph(f"Formula / Rule: {arith.get('formula_used', 'N/A')}")
@@ -1152,7 +1148,6 @@ def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     p_fin = doc.add_paragraph()
     p_fin.add_run(f"Final Score / Tally: {arith.get('final_tally', 'N/A')}").bold = True
 
-    # 2. Substantive Criticisms
     doc.add_heading("2. Substantive Content Criticisms", level=1)
     for idx, c in enumerate(deep_dive.get("substantive_criticisms", []), 1):
         p_c = doc.add_paragraph(style='List Bullet')
@@ -1160,7 +1155,6 @@ def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
         p_c.add_run(f"{c.get('manuscript_evidence')}\n")
         p_c.add_run(f"Epidemiological Impact: {c.get('epidemiological_impact')}")
 
-    # 3. Domain Deep Dive
     doc.add_heading("3. Domain Evaluation (Boilerplate Stripped)", level=1)
     table = doc.add_table(rows=1, cols=4)
     table.style = "Table Grid"
@@ -1189,6 +1183,98 @@ def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
 # ==========================================
 # 6. DOCUMENT GENERATION (STANDARD EXECUTIVE REPORTS)
 # ==========================================
+def build_docx_report(data: dict) -> io.BytesIO:
+    doc = Document()
+    title = doc.add_heading(level=0)
+    run_t = title.add_run(f"{APP_NAME} — Methodological Evaluation")
+    run_t.font.size = Pt(20)
+    run_t.font.bold = True
+    run_t.font.color.rgb = RGBColor(120, 187, 166)
+
+    ratings = data.get("ratings_summary", {})
+    harvard_authors = format_harvard_authors(data.get("authors", "Not Specified"), max_authors=3)
+
+    meta_table = doc.add_table(rows=8, cols=2)
+    meta_table.style = "Table Grid"
+    fields = [
+        ("Evaluated Title:", data.get("paper_title", "N/A")),
+        ("Authors (Harvard):", harvard_authors),
+        ("Journal & Year:", f"{data.get('journal', 'N/A')} ({data.get('year_published', 'N/A')})"),
+        ("DOI / Reference:", data.get("doi", "N/A")),
+        ("Study Architecture:", data.get("study_design", "N/A")),
+        ("Tool Applied:", data.get("appraisal_tool_selected", "N/A")),
+        ("Methodology / Reporting / Certainty:", f"{ratings.get('methodology_quality', 'N/A')} / {ratings.get('reporting_quality', 'N/A')} / {ratings.get('certainty_score', 'N/A')}"),
+        ("Evidence Groundedness:", f"{data.get('groundedness_score', 100.0)}%"),
+    ]
+    for idx, (label, val) in enumerate(fields):
+        row = meta_table.rows[idx]
+        shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="EBF5F2"/>')
+        row.cells[0]._tc.get_or_add_tcPr().append(shd)
+        row.cells[0].paragraphs[0].add_run(label).bold = True
+        row.cells[1].paragraphs[0].add_run(str(val))
+
+    doc.add_paragraph("")
+
+    takeaways = data.get("practical_takeaways", [])
+    if takeaways:
+        doc.add_heading("Practical Takeaways from the Paper (At-A-Glance)", level=2)
+        for idx, pt in enumerate(takeaways, 1):
+            p_t = doc.add_paragraph(style='List Bullet')
+            p_t.add_run(f"Takeaway #{idx}: ").bold = True
+            p_t.add_run(pt)
+
+    story_arc = data.get("narrative_arc_summary", [])
+    if story_arc:
+        doc.add_heading("Narrative Story Arc & Post-Grading Appraisal Journey", level=2)
+        for idx, pt in enumerate(story_arc, 1):
+            p_s = doc.add_paragraph(style='List Number')
+            parts = pt.split(":", 1)
+            if len(parts) == 2:
+                p_s.add_run(parts[0] + ":").bold = True
+                p_s.add_run(parts[1])
+            else:
+                p_s.add_run(pt)
+
+    doc.add_paragraph("")
+    doc.add_heading(f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})", level=1)
+    table = doc.add_table(rows=1, cols=4)
+    table.style = "Table Grid"
+    for i, h in enumerate(["Domain & Question", "Score", "Evidence", "Critique"]):
+        cell = table.rows[0].cells[i]
+        shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="78BBA6"/>')
+        cell._tc.get_or_add_tcPr().append(shd)
+        r = cell.paragraphs[0].add_run(h)
+        r.bold = True
+        r.font.color.rgb = RGBColor(255, 255, 255)
+
+    for item in data.get("domain_appraisals", []):
+        row_cells = table.add_row().cells
+        row_cells[0].paragraphs[0].add_run(f"{item.get('domain_name')}\n\nQuestion: \"{item.get('evaluation_question')}\"")
+        row_cells[1].paragraphs[0].add_run(str(item.get("rating")))
+        row_cells[2].paragraphs[0].add_run(f"[{item.get('location_reference')}]\n\"{item.get('verbatim_evidence')}\"")
+        row_cells[3].paragraphs[0].add_run(str(item.get("critique")))
+
+    doc.add_paragraph("")
+    doc.add_heading("2. Methodological Synthesis & Discussion (Key Points)", level=1)
+    synth = data.get("overall_synthesis", [])
+    if isinstance(synth, list):
+        for pt in synth:
+            parts = pt.split(":", 1)
+            p_synth = doc.add_paragraph(style='List Bullet')
+            if len(parts) == 2:
+                p_synth.add_run(parts[0] + ":").bold = True
+                p_synth.add_run(parts[1])
+            else:
+                p_synth.add_run(pt)
+    else:
+        doc.add_paragraph(str(synth))
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf
+
+
 def build_pdf_report(data: dict) -> io.BytesIO:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
