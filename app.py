@@ -189,23 +189,23 @@ TOOL_TAXONOMY = {
             },
             {
                 "name": "Domain 3: Classification of interventions",
-                "question": "Were intervention definitions clearly documented prospectively without misclassification or post-hoc assignment?",
+                "question": "Were intervention status and exposure definitions clearly and objectively defined without misclassification?",
             },
             {
                 "name": "Domain 4: Deviations from intended interventions",
-                "question": "Were there systematic deviations from intended interventions or co-interventions unbalanced between groups?",
+                "question": "Were there systematic deviations from intended interventions arising because of the experimental context?",
             },
             {
                 "name": "Domain 5: Missing data",
-                "question": "Were attrition rates documented with sensitivity analyses or multiple imputation accounting for missing observations?",
+                "question": "Were outcome data complete, or were missing data handled with robust sensitivity/imputation analyses?",
             },
             {
                 "name": "Domain 6: Measurement of outcomes",
-                "question": "Were outcome assessors blinded to exposure status, and were outcomes validated against clinical criteria?",
+                "question": "Were outcome assessors blinded, and were outcome measures valid, reliable, and applied equally?",
             },
             {
                 "name": "Domain 7: Selection of the reported result",
-                "question": "Are published results consistent with a pre-registered protocol without selective reporting of significant p-values?",
+                "question": "Are reported results free from selective outcome or analysis reporting based on statistical significance?",
             },
         ],
         "scale": "Low Risk | Moderate Risk | Serious Risk | Critical Risk | No Information. A single Critical Risk domain mandates an overall Critical Risk.",
@@ -217,19 +217,19 @@ TOOL_TAXONOMY = {
         "domains": [
             {
                 "name": "Domain 1: PICO & Protocol Pre-registration (Critical Domain)",
-                "question": "Did the review establish a formal PICO question AND register the protocol prospectively (e.g., PROSPERO) prior to screening?",
+                "question": "Did the review question and inclusion criteria include components of PICO, and was a protocol established and registered prior to conducting the review?",
             },
             {
                 "name": "Domain 2: Comprehensive Literature Search Strategy (Critical Domain)",
-                "question": "Did the authors search >=2 databases, provide full boolean search strings, search trial registries, and review grey literature?",
+                "question": "Did the authors search >=2 databases, provide full boolean search strings, search trial registries, and review reference lists?",
             },
             {
                 "name": "Domain 3: Duplicate Study Selection & Extraction",
-                "question": "Did at least two reviewers independently screen titles, abstracts, and full texts with documented consensus agreement?",
+                "question": "Did at least two authors independently screen titles, abstracts, and full texts, and extract study data?",
             },
             {
                 "name": "Domain 4: Excluded Studies Justification (Critical Domain)",
-                "question": "Did the authors provide a full bibliographic list of potentially relevant excluded studies along with explicit reasons for each exclusion?",
+                "question": "Did the authors provide a comprehensive list of potentially relevant excluded studies along with explicit reasons for each exclusion?",
             },
             {
                 "name": "Domain 5: Primary Study RoB Assessment (Critical Domain)",
@@ -237,11 +237,11 @@ TOOL_TAXONOMY = {
             },
             {
                 "name": "Domain 6: Meta-Analytic Synthesis Appropriateness (Critical Domain)",
-                "question": "If statistical pooling was performed, were random-effects models justified and statistical heterogeneity (I^2, Chi^2) explicitly investigated?",
+                "question": "If quantitative synthesis was performed, were statistical pooling methods justified and investigated for heterogeneity?",
             },
             {
                 "name": "Domain 7: Publication Bias Assessment (Critical Domain)",
-                "question": "Did the authors formally test for small-study effects/publication bias (funnel plots, Egger's test) for comparisons with >=10 studies?",
+                "question": "Did the authors investigate publication bias (funnel plots, Egger's test) and discuss its likely clinical impact?",
             },
             {
                 "name": "Domain 8: Conflict of Interest & Funding Reporting",
@@ -629,6 +629,45 @@ def run_comprehensive_checksum(
     return data, grounded_score, grounding_warnings, flaw_warnings
 
 
+def format_harvard_filename(data: dict, extension: str) -> str:
+    """
+    Constructs filename according to the Harvard short citation convention:
+    [LeadAuthor]_[Year]_[ToolUsed]_KAT.[ext] or [LeadAuthor_et_al]_[Year]_[ToolUsed]_KAT.[ext]
+    """
+    raw_authors = str(data.get("authors", "")).strip()
+    year = str(data.get("year_published", "")).strip()
+    tool = str(data.get("appraisal_tool_selected", "Tool")).strip()
+
+    # Extract 4-digit year fallback if needed
+    year_match = re.search(r"\b(19\d\d|20\d\d)\b", year)
+    clean_year = year_match.group(1) if year_match else "UnknownYear"
+
+    # Determine Harvard short author format
+    if not raw_authors or raw_authors.lower() in ["not specified", "unspecified", "unknown"]:
+        author_part = "AuthorUnknown"
+    else:
+        # Check for multiple authors indicators
+        has_multiple = any(marker in raw_authors.lower() for marker in ["et al", " and ", "&", ","])
+        # Extract the primary surname
+        first_segment = re.split(r"[,;&]|\sand\s|\set\sal", raw_authors, flags=re.IGNORECASE)[0].strip()
+        tokens = [t for t in re.split(r"\s+", first_segment) if re.search(r"[a-zA-Z]", t)]
+        if tokens:
+            # Drop trailing initials (e.g. "Smith JA" -> "Smith", or "Smith, J." -> "Smith")
+            surname = tokens[-1] if (len(tokens) > 1 and len(tokens[0]) <= 2) else tokens[0]
+            surname = re.sub(r"[^a-zA-Z0-9]", "", surname)
+        else:
+            surname = "Author"
+
+        author_part = f"{surname}_et_al" if has_multiple else surname
+
+    # Sanitize tool and build final string
+    clean_tool = re.sub(r"[^a-zA-Z0-9_-]", "_", tool)
+    clean_author = re.sub(r"[^a-zA-Z0-9_-]", "_", author_part)
+    clean_filename = f"{clean_author}_{clean_year}_{clean_tool}_KAT.{extension.lstrip('.')}"
+    # Deduplicate consecutive underscores
+    return re.sub(r"_+", "_", clean_filename)
+
+
 def execute_manuscript_evaluation(
     client: genai.Client,
     text_content: Optional[str] = None,
@@ -643,7 +682,6 @@ def execute_manuscript_evaluation(
 
     taxonomy_json = json.dumps(active_tool_taxonomy, indent=2)
 
-    # Epistemological instruction enforcing strict adherence to appraisal standards
     system_instruction = f"""
     You are an unyielding, rigorous epidemiological auditor and methodological quality adjudicator.
     You evaluate research manuscripts with ZERO benefit of the doubt.
@@ -739,7 +777,7 @@ def execute_manuscript_evaluation(
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         response_mime_type="application/json",
-                        temperature=0.0,  # 0.0 guarantees deterministic, unyielding rubric enforcement
+                        temperature=0.0,
                     ),
                 )
                 return json.loads(response.text)
@@ -1333,7 +1371,6 @@ with st.sidebar:
     else:
         st.success("Access Credential Verified")
 
-    # Strictness Controller
     strictness_choice = st.radio(
         "Adjudication Strictness:",
         options=[
@@ -1590,8 +1627,10 @@ if "appraisal_data" in st.session_state:
             st.markdown(f"**Purpose:** {tool_meta.get('purpose')}")
             st.markdown(f"**Scoring Metric:** {tool_meta.get('scoring_rules')}")
 
-    # Export Documents (Word & PDF)
-    safe_title = re.sub(r"[^a-zA-Z0-9_-]", "_", data.get("paper_title", "Report")[:25])
+    # Build Harvard Short Citation Filename: [Author]_[Year]_[Tool]_KAT.[ext]
+    harvard_docx_name = format_harvard_filename(data, "docx")
+    harvard_pdf_name = format_harvard_filename(data, "pdf")
+
     col_docx, col_pdf = st.columns(2)
 
     with col_docx:
@@ -1599,7 +1638,7 @@ if "appraisal_data" in st.session_state:
         st.download_button(
             label="📥 Download Word Document (.docx)",
             data=doc_buf,
-            file_name=f"Kitique_{data.get('appraisal_tool_selected')}_{safe_title}.docx",
+            file_name=harvard_docx_name,
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             use_container_width=True,
         )
@@ -1609,7 +1648,7 @@ if "appraisal_data" in st.session_state:
         st.download_button(
             label="📥 Download Formatted PDF (.pdf)",
             data=pdf_buf,
-            file_name=f"Kitique_{data.get('appraisal_tool_selected')}_{safe_title}.pdf",
+            file_name=harvard_pdf_name,
             mime="application/pdf",
             use_container_width=True,
         )
