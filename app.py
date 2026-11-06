@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 from bs4 import BeautifulSoup
 from docx import Document
 from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from docx.shared import Inches, Pt, RGBColor
@@ -117,7 +118,7 @@ TOOL_TAXONOMY = {
             },
             {
                 "name": "Domain 2: Stakeholder Involvement",
-                "question": "Does the development group include all relevant professional groups, have patient/target population views been sought, and are target users clearly defined?",
+                "question": "Does the group include all relevant professional groups, have patient/target population views been sought, and are target users clearly defined?",
             },
             {
                 "name": "Domain 3: Rigour of Development",
@@ -136,7 +137,7 @@ TOOL_TAXONOMY = {
                 "question": "Did the funding body influence guideline content, and were competing interests of development group members recorded and addressed?",
             },
         ],
-        "scale": "1 (Strongly Disagree / Absent) to 7 (Strongly Agree / Exemplary). Overall domain scores are calculated as standardized percentages: (Obtained Score - Minimum Possible Score) / (Maximum Possible Score - Minimum Possible Score) * 100%. >70% indicates high quality.",
+        "scale": "1 (Strongly Disagree / Absent) to 7 (Strongly Agree / Exemplary). Overall domain scores are calculated as standardized percentages. >70% indicates high quality.",
     },
     "Randomized Controlled Trial (RCT)": {
         "tool": "Cochrane RoB 2",
@@ -353,7 +354,7 @@ TOOL_TAXONOMY = {
 }
 
 # ==========================================
-# 3. EXTRACTION ENGINE & GEMINI PIPELINE
+# 3. EXTRACTION, PATTERN RECOGNITION & GEMINI
 # ==========================================
 def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     """Extracts text page-by-page. Returns empty string if unreadable or scanned."""
@@ -384,28 +385,132 @@ def extract_text_from_url(url: str) -> str:
     return article.get_text(separator="\n", strip=True) if article else ""
 
 
+def classify_study_design_heuristically(text: str) -> str:
+    """Fast local pattern matching on title/abstract/methods to assign tool in <0.05 seconds."""
+    header_text = text[:7000].lower()
+
+    # Priority 1: Clinical Practice Guidelines & Consensus Statements
+    if any(re.search(p, header_text) for p in [
+        r"clinical\s+practice\s+guideline",
+        r"consensus\s+statement",
+        r"recommendations\s+for\s+clinical\s+practice",
+        r"clinical\s+guideline",
+        r"delphi\s+consensus"
+    ]):
+        return "Clinical Practice Guideline / Consensus Statement"
+
+    # Priority 2: Systematic Reviews & Meta-Analyses
+    if any(re.search(p, header_text) for p in [
+        r"systematic\s+review",
+        r"meta-analysis",
+        r"prisma",
+        r"cochrane\s+database\s+of\s+systematic\s+reviews"
+    ]):
+        return "Systematic Review / Meta-Analysis"
+
+    # Priority 3: Randomized Controlled Trials
+    if any(re.search(p, header_text) for p in [
+        r"randomised\s+controlled\s+trial",
+        r"randomized\s+controlled\s+trial",
+        r"double-blind",
+        r"placebo-controlled",
+        r"randomly\s+assigned",
+        r"rct\b"
+    ]):
+        return "Randomized Controlled Trial (RCT)"
+
+    # Priority 4: Diagnostic Accuracy Studies
+    if any(re.search(p, header_text) for p in [
+        r"diagnostic\s+accuracy",
+        r"sensitivity\s+and\s+specificity",
+        r"receiver\s+operating\s+characteristic",
+        r"index\s+test",
+        r"reference\s+standard"
+    ]):
+        return "Diagnostic Accuracy Study"
+
+    # Priority 5: Qualitative Studies
+    if any(re.search(p, header_text) for p in [
+        r"qualitative\s+study",
+        r"thematic\s+analysis",
+        r"semi-structured\s+interview",
+        r"focus\s+groups?",
+        r"grounded\s+theory",
+        r"phenomenological"
+    ]):
+        return "Qualitative Study"
+
+    # Priority 6: Observational (Cohort / Case-Control)
+    if any(re.search(p, header_text) for p in [
+        r"cohort\s+study",
+        r"prospective\s+cohort",
+        r"retrospective\s+cohort",
+        r"case-control",
+        r"cross-sectional\s+study",
+        r"longitudinal\s+study"
+    ]):
+        return "Observational Study (Cohort or Case-Control)"
+
+    # Priority 7: Non-randomized / Quasi-experimental
+    if any(re.search(p, header_text) for p in [
+        r"quasi-experimental",
+        r"non-randomi[zs]ed",
+        r"controlled\s+before-and-after",
+        r"interrupted\s+time\s+series"
+    ]):
+        return "Non-Randomized Intervention / Quasi-Experimental"
+
+    return "Narrative Review"
+
+
+def trim_manuscript_body(text: str) -> str:
+    """Clips trailing references/bibliography to cut token count by ~25-35%."""
+    ref_markers = [
+        "\nreferences\n",
+        "\nreferences \n",
+        "\nbibliography\n",
+        "\nliterature cited\n",
+        "\nreferences & notes\n"
+    ]
+    lower = text.lower()
+    cut_pos = -1
+    for marker in ref_markers:
+        pos = lower.rfind(marker)
+        if pos != -1 and pos > (len(text) * 0.45):  # Must be in second half of paper
+            cut_pos = pos
+            break
+
+    if cut_pos != -1:
+        return text[:cut_pos]
+    return text
+
+
 def appraise_with_gemini(
     client: genai.Client,
     text_content: Optional[str] = None,
     raw_pdf_bytes: Optional[bytes] = None,
+    assigned_design: Optional[str] = None,
 ) -> dict:
-    taxonomy_json = json.dumps(TOOL_TAXONOMY, indent=2)
+    # Pass only the selected tool into the prompt to reduce token count and reasoning latency
+    if assigned_design and assigned_design in TOOL_TAXONOMY:
+        active_tool_taxonomy = {assigned_design: TOOL_TAXONOMY[assigned_design]}
+    else:
+        active_tool_taxonomy = TOOL_TAXONOMY
+
+    taxonomy_json = json.dumps(active_tool_taxonomy, indent=2)
 
     system_instruction = f"""
     You are an expert epidemiological reviewer and methodological appraiser.
-    Evaluate the provided research paper or clinical guideline and perform a rigorous critical appraisal.
+    Evaluate the provided research paper and perform a critical appraisal.
 
-    Appraisal Tool Taxonomy & Domain Questions:
+    Pre-Assigned Appraisal Tool & Domains:
     {taxonomy_json}
 
     Step-by-Step Instructions:
-    1. Study Design Classification:
-       - Classify the manuscript into ONE design from the taxonomy.
-       - If it is a formal clinical practice guideline or consensus statement with recommendations, apply AGREE II.
-    2. Tool Assignment:
-       - Apply the corresponding Gold-Standard Tool. Evaluate EVERY domain and question listed for that tool.
+    1. Study Design: The paper has been pre-classified as: '{assigned_design if assigned_design else 'Auto-detect'}'. Confirm and apply its corresponding Gold-Standard Tool.
+    2. Tool Assignment: Evaluate EVERY domain and question listed for this assigned tool.
     3. Grounded Evidence Extraction:
-       - Include the 'evaluation_question' as provided in the taxonomy.
+       - Include the exact 'evaluation_question' as provided in the taxonomy.
        - Extract the exact 'verbatim_evidence' (direct quote from the text).
        - Provide the exact 'location_reference' (e.g., "[Page 4] Methods §Randomization" or section name).
        - Provide an analytical 'critique' justifying the score/rating.
@@ -418,7 +523,7 @@ def appraise_with_gemini(
     CRITICAL: Output ONLY a valid JSON object matching this schema:
     {{
       "paper_title": "Identified title",
-      "study_design": "Identified design matching taxonomy",
+      "study_design": "{assigned_design if assigned_design else 'Identified design matching taxonomy'}",
       "appraisal_tool_selected": "Name of appraisal tool",
       "quality_tier": "GREEN / YELLOW / RED",
       "overall_verdict": "Low Risk / Moderate Risk / High Risk / Recommended / etc.",
@@ -442,17 +547,19 @@ def appraise_with_gemini(
     }}
     """
 
+    clean_text = trim_manuscript_body(text_content) if text_content else ""
+
     contents = []
-    if text_content and len(text_content.strip()) > 150:
+    if clean_text and len(clean_text.strip()) > 150:
         contents.append(
-            f"PAPER CONTENT:\n{text_content}\n\nPerform the full critical appraisal and return the JSON object."
+            f"PAPER CONTENT:\n{clean_text}\n\nPerform the critical appraisal for the pre-assigned tool and return the JSON object."
         )
     elif raw_pdf_bytes:
         contents.append(
             types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf")
         )
         contents.append(
-            "Perform the full critical appraisal using vision OCR on this paper and return the JSON object."
+            f"Perform the critical appraisal for {assigned_design} using vision OCR on this paper and return the JSON object."
         )
     else:
         raise ValueError("No valid manuscript text or PDF bytes supplied.")
@@ -543,7 +650,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
     # --- THREE-BAR VISUAL QUALITY GAUGE ---
     tier = str(data.get("quality_tier", "")).upper()
     if "GREEN" not in tier and "YELLOW" not in tier and "RED" not in tier:
-        # Determine fallback tier based on verdict text
         v = str(data.get("overall_verdict", "")).lower()
         if any(w in v for w in ["low", "high confidence", "recommended", "good"]):
             tier = "GREEN"
@@ -718,7 +824,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
     purpose = tool_meta.get("purpose") or "Standardized epidemiological instrument used to assess bias and study rigour."
     scoring_rules = tool_meta.get("scoring_rules") or "Standard qualitative rating or numerical score threshold."
 
-    # Look up in taxonomy if tool_meta was incomplete
     design_match = TOOL_TAXONOMY.get(data.get("study_design", ""))
     if design_match:
         if not full_name or full_name == "Standard Critical Appraisal Instrument":
@@ -764,9 +869,6 @@ st.markdown(
     """
 <style>
     .stButton>button { width: 100%; border-radius: 8px; font-weight: 600; }
-    .gauge-container { display: flex; gap: 8px; margin-top: 10px; margin-bottom: 20px; }
-    .gauge-bar { flex: 1; padding: 12px; border-radius: 6px; text-align: center; font-weight: bold; font-size: 14px; }
-    .gauge-active { border: 2px solid #ffffff; box-shadow: 0 0 10px rgba(0,0,0,0.3); }
 </style>
 """,
     unsafe_allow_html=True,
@@ -791,7 +893,7 @@ if not st.session_state["authenticated"]:
 
 # --- Main App (Post Authentication) ---
 st.title("📑 AppraiseAI: Research Paper & Guideline Grader")
-st.caption("Powered by Gemini Fast Text Engine with Vision OCR Fallback")
+st.caption("Powered by Gemini Fast Text Engine + Heuristic Pattern Matching")
 
 api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None))
 
@@ -851,12 +953,12 @@ with tab_pdf:
     if uploaded:
         raw_pdf_bytes = uploaded.read()
         filename_tag = uploaded.name
-        with st.spinner("Parsing text locally from PDF pages..."):
+        with st.spinner("Extracting text locally from PDF pages..."):
             paper_text = extract_text_from_pdf_bytes(raw_pdf_bytes)
 
         if paper_text:
             st.success(
-                f"⚡ Parsed text successfully ({len(paper_text):,} characters extracted via python)"
+                f"⚡ Parsed text successfully ({len(paper_text):,} characters extracted)"
             )
         else:
             st.warning(
@@ -878,6 +980,27 @@ with tab_url:
                 except Exception as e:
                     st.error(f"Failed to fetch content: {str(e)}")
 
+# Heuristic pattern recognition
+detected_design = "Randomized Controlled Trial (RCT)"
+if paper_text:
+    detected_design = classify_study_design_heuristically(paper_text)
+
+# Let user confirm or override Python's pattern recognition
+st.markdown("---")
+available_designs = list(TOOL_TAXONOMY.keys())
+default_idx = (
+    available_designs.index(detected_design)
+    if detected_design in available_designs
+    else 0
+)
+
+selected_design = st.selectbox(
+    "Target Study Architecture (Auto-detected via Python heuristics):",
+    options=available_designs,
+    index=default_idx,
+    help="Python detected this study design based on title, abstract, and methodology keywords. You can manually adjust it if needed."
+)
+
 if st.button("⚡ Run Methodological Appraisal", type="primary"):
     if not api_key:
         st.warning("Please enter your Gemini API key in the sidebar.")
@@ -888,14 +1011,15 @@ if st.button("⚡ Run Methodological Appraisal", type="primary"):
         mode_label = (
             "Vision OCR"
             if (raw_pdf_bytes and not paper_text)
-            else "Extracted Text"
+            else "Extracted Text (Trimmed)"
         )
-        with st.spinner(f"Evaluating domains and criteria using {mode_label}..."):
+        with st.spinner(f"Evaluating {selected_design} using {mode_label}..."):
             try:
                 data = appraise_with_gemini(
                     client,
                     text_content=paper_text,
                     raw_pdf_bytes=raw_pdf_bytes if not paper_text else None,
+                    assigned_design=selected_design,
                 )
                 new_id = save_appraisal(data, filename_tag)
                 st.session_state["appraisal_data"] = data
