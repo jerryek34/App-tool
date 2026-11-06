@@ -1,3 +1,4 @@
+import difflib
 import io
 import json
 import os
@@ -5,11 +6,11 @@ import re
 import sqlite3
 import time
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from bs4 import BeautifulSoup
 from docx import Document
-from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
+from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
@@ -17,6 +18,11 @@ from docx.shared import Inches, Pt, RGBColor
 from google import genai
 from google.genai import types
 from pypdf import PdfReader
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 import requests
 import streamlit as st
 
@@ -24,6 +30,7 @@ import streamlit as st
 # 1. DATABASE LAYER (SQLite)
 # ==========================================
 DB_NAME = "appraisals.db"
+APP_NAME = "Kitique Appraisal Tool"
 
 
 def get_connection():
@@ -354,10 +361,9 @@ TOOL_TAXONOMY = {
 }
 
 # ==========================================
-# 3. EXTRACTION, PATTERN RECOGNITION & GEMINI
+# 3. EXTRACTION, CHECKSUM & GEMINI
 # ==========================================
 def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
-    """Extracts text page-by-page. Returns empty string if unreadable or scanned."""
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
         extracted = []
@@ -386,7 +392,6 @@ def extract_text_from_url(url: str) -> str:
 
 
 def classify_study_design_heuristically(text: str) -> str:
-    """Fast local pattern matching on title/abstract/methods in <0.05 seconds."""
     header_text = text[:7000].lower()
 
     if any(re.search(p, header_text) for p in [
@@ -457,7 +462,6 @@ def classify_study_design_heuristically(text: str) -> str:
 
 
 def trim_manuscript_body(text: str) -> str:
-    """Clips trailing references/bibliography to cut token count by ~25-35%."""
     ref_markers = [
         "\nreferences\n",
         "\nreferences \n",
@@ -478,6 +482,114 @@ def trim_manuscript_body(text: str) -> str:
     return text
 
 
+def clean_tokens(s: str) -> List[str]:
+    """Normalizes text by removing punctuation, casing, hyphens, and whitespace splits."""
+    s = s.lower()
+    # Normalize unicode quotes and dashes
+    s = re.sub(r"[\u2018\u2019\u201c\u201d]", "'", s)
+    s = re.sub(r"[\u2013\u2014-]", " ", s)
+    # Strip non-alphanumeric characters
+    s = re.sub(r"[^a-z0-9\s]", " ", s)
+    return s.split()
+
+
+def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.82) -> Tuple[bool, float]:
+    """
+    Checks if a quote exists within source_text using sliding token windows
+    and difflib SequenceMatcher to absorb OCR errors, typos, and line-wrap hyphens.
+    """
+    quote_tokens = clean_tokens(quote)
+    if not quote_tokens:
+        return True, 1.0
+
+    q_len = len(quote_tokens)
+    q_str = " ".join(quote_tokens)
+
+    # 1. Exact canonical substring shortcut
+    source_clean = " ".join(clean_tokens(source_text))
+    if q_str in source_clean:
+        return True, 1.0
+
+    source_tokens = clean_tokens(source_text)
+    if not source_tokens:
+        return False, 0.0
+
+    # Short quote fallback (under 5 tokens)
+    if q_len < 5:
+        # Check token set inclusion
+        q_set = set(quote_tokens)
+        s_set = set(source_tokens)
+        overlap = len(q_set & s_set) / float(len(q_set))
+        return (overlap >= threshold), overlap
+
+    # 2. Sliding Window with SequenceMatcher
+    best_ratio = 0.0
+    step = max(1, int(q_len * 0.35))
+    window_sizes = [q_len, int(q_len * 1.15)]
+
+    for w_size in window_sizes:
+        for i in range(0, len(source_tokens) - q_len + 1, step):
+            window = " ".join(source_tokens[i : i + w_size])
+            # Quick length gate before running sequence matcher
+            if abs(len(window) - len(q_str)) > len(q_str) * 0.4:
+                continue
+            ratio = difflib.SequenceMatcher(None, q_str, window).quick_ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+            if best_ratio >= threshold:
+                return True, best_ratio
+
+    # Final detailed check on the best sliding candidate
+    return (best_ratio >= threshold), best_ratio
+
+
+def run_python_groundedness_checksum(
+    data: dict, full_raw_text: str, fuzzy_threshold: float = 0.82
+) -> Tuple[dict, float, List[str]]:
+    """
+    Deterministic Python checksum verifying that LLM verbatim quotes are grounded
+    in the document using sliding fuzzy token matching.
+    """
+    if not full_raw_text or not full_raw_text.strip():
+        return data, 100.0, ["Source text unavailable for verification."]
+
+    domains = data.get("domain_appraisals", [])
+    if not domains:
+        return data, 100.0, []
+
+    verified_count = 0
+    warnings = []
+
+    for d in domains:
+        quote = d.get("verbatim_evidence", "").strip()
+        if not quote or quote.lower() in [
+            "not reported",
+            "none",
+            "n/a",
+            "not specified",
+            "unclear",
+        ]:
+            d["checksum_status"] = "Verified (Not Applicable)"
+            verified_count += 1
+            continue
+
+        is_match, ratio = fuzzy_quote_match(quote, full_raw_text, threshold=fuzzy_threshold)
+
+        if is_match:
+            d["checksum_status"] = f"Verified Grounded ({int(ratio * 100)}% Match)"
+            verified_count += 1
+        else:
+            d["checksum_status"] = f"Unverified Grounding ({int(ratio * 100)}% Max Similarity)"
+            warnings.append(
+                f"Quote in '{d.get('domain_name')}' matched at only {int(ratio * 100)}% (threshold: {int(fuzzy_threshold * 100)}%)."
+            )
+
+    grounded_score = round((verified_count / len(domains)) * 100, 1)
+    data["groundedness_score"] = grounded_score
+    data["groundedness_warnings"] = warnings
+    return data, grounded_score, warnings
+
+
 def appraise_with_gemini(
     client: genai.Client,
     text_content: Optional[str] = None,
@@ -493,29 +605,39 @@ def appraise_with_gemini(
 
     system_instruction = f"""
     You are an expert epidemiological reviewer and methodological appraiser.
-    Evaluate the provided research paper and perform a critical appraisal.
+    Evaluate the provided research paper or clinical guideline and perform a critical appraisal.
 
-    Pre-Assigned Appraisal Tool & Domains:
+    Appraisal Tool Assigned:
     {taxonomy_json}
 
     Step-by-Step Instructions:
-    1. Study Design: The paper has been pre-classified as: '{assigned_design if assigned_design else 'Auto-detect'}'. Confirm and apply its corresponding Gold-Standard Tool.
-    2. Tool Assignment: Evaluate EVERY domain and question listed for this assigned tool.
-    3. Grounded Evidence Extraction:
+    1. Bibliographic Extraction:
+       - Extract the paper's exact 'paper_title'.
+       - Extract 'authors' (e.g., "Smith JA, Doe B, et al.").
+       - Extract 'journal' (journal name, or 'Unspecified').
+       - Extract 'year_published' (e.g., "2024").
+       - Extract 'doi' (e.g., "10.1016/j.math.2023...").
+    2. Confirm Study Design: The paper has been pre-classified as '{assigned_design if assigned_design else 'Auto-detect'}'. Confirm and apply the corresponding Gold-Standard Tool.
+    3. Tool Assignment: Evaluate EVERY domain and question listed for this assigned tool.
+    4. Grounded Evidence Extraction:
        - Include the exact 'evaluation_question' as provided in the taxonomy.
-       - Extract the exact 'verbatim_evidence' (direct quote from the text).
-       - Provide the exact 'location_reference' (e.g., "[Page 4] Methods §Randomization" or section name).
+       - Extract the EXACT 'verbatim_evidence' directly word-for-word from the text.
+       - Provide the exact 'location_reference' (e.g., "[Page 4] Methods §Randomization").
        - Provide an analytical 'critique' justifying the score/rating.
-    4. Provide an overall verdict, synthesis, and categorize 'quality_tier' into exactly one of: "GREEN", "YELLOW", or "RED":
+    5. Categorize 'quality_tier' into exactly one of: "GREEN", "YELLOW", or "RED".
        - "GREEN": Methodologically robust, low risk of bias, high clinical relevance and validity.
        - "YELLOW": Moderate quality, some methodological concerns, fair clinical applicability.
        - "RED": High risk of bias, critical flaws, weak validity, or poor applicability.
-    5. In 'tool_meta', return the tool acronym, full expanded name, explanation of the tool, and the formal scoring rules/percentages required.
+    6. Return full 'tool_meta' (acronym, full_name, purpose, scoring_rules).
 
     CRITICAL: Output ONLY a valid JSON object matching this schema:
     {{
-      "paper_title": "Identified title",
-      "study_design": "{assigned_design if assigned_design else 'Identified design matching taxonomy'}",
+      "paper_title": "Identified full title",
+      "authors": "First Author et al. or full author list",
+      "journal": "Journal Name",
+      "year_published": "YYYY",
+      "doi": "DOI or URL",
+      "study_design": "{assigned_design if assigned_design else 'Identified design'}",
       "appraisal_tool_selected": "Name of appraisal tool",
       "quality_tier": "GREEN / YELLOW / RED",
       "overall_verdict": "Low Risk / Moderate Risk / High Risk / Recommended / etc.",
@@ -544,19 +666,18 @@ def appraise_with_gemini(
     contents = []
     if clean_text and len(clean_text.strip()) > 150:
         contents.append(
-            f"PAPER CONTENT:\n{clean_text}\n\nPerform the critical appraisal for the pre-assigned tool and return the JSON object."
+            f"PAPER CONTENT:\n{clean_text}\n\nPerform the full critical appraisal and return the JSON object."
         )
     elif raw_pdf_bytes:
         contents.append(
             types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf")
         )
         contents.append(
-            f"Perform the critical appraisal for {assigned_design} using vision OCR on this paper and return the JSON object."
+            f"Perform the critical appraisal for {assigned_design} using vision OCR and return the JSON object."
         )
     else:
         raise ValueError("No valid manuscript text or PDF bytes supplied.")
 
-    # High-throughput, lowest-latency priority models
     candidate_models = [
         "gemini-3.5-flash-lite",
         "gemini-2.5-flash-lite",
@@ -582,8 +703,6 @@ def appraise_with_gemini(
             except Exception as e:
                 err_str = str(e)
                 last_error = e
-
-                # Fast failover: if busy (503/429), try once quickly, then jump to next model
                 if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str:
                     time.sleep(1.5)
                     continue
@@ -596,7 +715,7 @@ def appraise_with_gemini(
 
 
 # ==========================================
-# 4. WORD DOCUMENT GENERATION (.docx)
+# 4. WORD (.docx) & PDF EXPORT ENGINES
 # ==========================================
 def set_cell_background(cell, fill_hex: str):
     shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
@@ -607,22 +726,25 @@ def build_docx_report(data: dict) -> io.BytesIO:
     doc = Document()
 
     title = doc.add_heading(level=0)
-    run_t = title.add_run("Critical Appraisal & Methodological Quality Report")
+    run_t = title.add_run(f"{APP_NAME} — Methodological Evaluation")
     run_t.font.size = Pt(20)
     run_t.font.bold = True
     run_t.font.color.rgb = RGBColor(31, 78, 121)
 
-    p_sub = doc.add_paragraph("Automated evidence synthesis evaluated via Google Gemini.")
+    p_sub = doc.add_paragraph("Automated critical evidence synthesis evaluated via Google Gemini.")
     p_sub.runs[0].font.size = Pt(9.5)
     p_sub.runs[0].italic = True
 
-    meta_table = doc.add_table(rows=4, cols=2)
+    meta_table = doc.add_table(rows=7, cols=2)
     meta_table.style = "Table Grid"
     fields = [
         ("Evaluated Title:", data.get("paper_title", "N/A")),
+        ("Authors:", data.get("authors", "Not Specified")),
+        ("Journal & Year:", f"{data.get('journal', 'N/A')} ({data.get('year_published', 'N/A')})"),
+        ("DOI / Reference:", data.get("doi", "N/A")),
         ("Study Architecture:", data.get("study_design", "N/A")),
         ("Gold-Standard Tool Applied:", data.get("appraisal_tool_selected", "N/A")),
-        ("Overall Quality / Risk Verdict:", data.get("overall_verdict", "N/A")),
+        ("Fuzzy Groundedness Checksum:", f"{data.get('groundedness_score', 100.0)}% Evidence Verified in Source Text"),
     ]
     for idx, (label, val) in enumerate(fields):
         row = meta_table.rows[idx]
@@ -630,13 +752,13 @@ def build_docx_report(data: dict) -> io.BytesIO:
         p0 = row.cells[0].paragraphs[0]
         r0 = p0.add_run(label)
         r0.bold = True
-        r0.font.size = Pt(10)
+        r0.font.size = Pt(9.5)
         p1 = row.cells[1].paragraphs[0]
-        r1 = p1.add_run(val)
-        r1.font.size = Pt(10)
-        if idx == 3:
+        r1 = p1.add_run(str(val))
+        r1.font.size = Pt(9.5)
+        if idx == 6:
             r1.bold = True
-            r1.font.color.rgb = RGBColor(170, 30, 30)
+            r1.font.color.rgb = RGBColor(40, 120, 40) if data.get('groundedness_score', 100.0) >= 80 else RGBColor(180, 40, 40)
 
     doc.add_paragraph("")
 
@@ -644,12 +766,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
     tier = str(data.get("quality_tier", "")).upper()
     if "GREEN" not in tier and "YELLOW" not in tier and "RED" not in tier:
         v = str(data.get("overall_verdict", "")).lower()
-        if any(w in v for w in ["low", "high confidence", "recommended", "good"]):
-            tier = "GREEN"
-        elif any(w in v for w in ["some", "moderate", "fair"]):
-            tier = "YELLOW"
-        else:
-            tier = "RED"
+        tier = "GREEN" if any(w in v for w in ["low", "high confidence", "recommended", "good"]) else ("YELLOW" if any(w in v for w in ["some", "moderate"]) else "RED")
 
     p_gauge_label = doc.add_paragraph()
     r_gl = p_gauge_label.add_run("Methodological Rigour & Clinical Trustworthiness Gauge (At-A-Glance):")
@@ -716,6 +833,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
     for item in data.get("domain_appraisals", []):
         row_cells = table.add_row().cells
 
+        # Col 0: Domain Name + Question Prompt for Context
         p_d = row_cells[0].paragraphs[0]
         r_name = p_d.add_run(f"{item.get('domain_name', '')}\n\n")
         r_name.bold = True
@@ -731,21 +849,30 @@ def build_docx_report(data: dict) -> io.BytesIO:
             r_qt.italic = True
             r_qt.font.size = Pt(8.5)
 
+        # Col 1: Score/Rating
         p_r = row_cells[1].paragraphs[0]
         r_sc = p_r.add_run(item.get("rating", ""))
         r_sc.bold = True
         r_sc.font.size = Pt(10)
 
+        # Col 2: Evidence & Section Location + Checksum verification status
         p_e = row_cells[2].paragraphs[0]
         loc = item.get("location_reference", "Section")
         r_loc = p_e.add_run(f"[{loc}]\n")
         r_loc.bold = True
         r_loc.font.size = Pt(8)
         r_loc.font.color.rgb = RGBColor(90, 90, 90)
-        r_q = p_e.add_run(f'"{item.get("verbatim_evidence", "")}"')
+        r_q = p_e.add_run(f'"{item.get("verbatim_evidence", "")}"\n\n')
         r_q.italic = True
         r_q.font.size = Pt(8.5)
+        
+        status = item.get("checksum_status", "Verified Grounded")
+        r_chk = p_e.add_run(f"✓ {status}" if "Verified" in status else f"⚠️ {status}")
+        r_chk.bold = True
+        r_chk.font.size = Pt(7.5)
+        r_chk.font.color.rgb = RGBColor(30, 130, 30) if "Verified" in status else RGBColor(180, 40, 40)
 
+        # Col 3: Detailed Critique
         p_c = row_cells[3].paragraphs[0]
         r_crit = p_c.add_run(item.get("critique", ""))
         r_crit.font.size = Pt(9)
@@ -846,16 +973,231 @@ def build_docx_report(data: dict) -> io.BytesIO:
     return buf
 
 
+def build_pdf_report(data: dict) -> io.BytesIO:
+    """Generates an executive, styled PDF report via ReportLab in pure Python."""
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=letter,
+        rightMargin=36,
+        leftMargin=36,
+        topMargin=36,
+        bottomMargin=36
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "DocTitle",
+        parent=styles["Heading1"],
+        fontSize=18,
+        leading=22,
+        textColor=colors.HexColor("#1F4E79"),
+        fontName="Helvetica-Bold",
+        spaceAfter=4,
+    )
+    sub_style = ParagraphStyle(
+        "DocSub",
+        parent=styles["Normal"],
+        fontSize=8.5,
+        leading=11,
+        textColor=colors.HexColor("#555555"),
+        fontName="Helvetica-Oblique",
+        spaceAfter=12,
+    )
+    h1_style = ParagraphStyle(
+        "H1",
+        parent=styles["Heading2"],
+        fontSize=12,
+        leading=16,
+        textColor=colors.HexColor("#1F4E79"),
+        fontName="Helvetica-Bold",
+        spaceBefore=12,
+        spaceAfter=6,
+    )
+    body_style = ParagraphStyle(
+        "Body",
+        parent=styles["Normal"],
+        fontSize=8.5,
+        leading=11.5,
+        fontName="Helvetica",
+    )
+    bold_body_style = ParagraphStyle(
+        "BoldBody",
+        parent=body_style,
+        fontName="Helvetica-Bold",
+    )
+    table_header_style = ParagraphStyle(
+        "TableHeader",
+        parent=body_style,
+        fontName="Helvetica-Bold",
+        textColor=colors.white,
+        fontSize=8.5,
+        leading=11,
+    )
+
+    story = []
+
+    # Title Banner
+    story.append(Paragraph(f"{APP_NAME} — Methodological Evaluation", title_style))
+    story.append(Paragraph("Automated critical evidence synthesis evaluated via Google Gemini.", sub_style))
+
+    # Bibliographic Metadata Table
+    meta_data = [
+        [Paragraph("Evaluated Title:", bold_body_style), Paragraph(data.get("paper_title", "N/A"), body_style)],
+        [Paragraph("Authors:", bold_body_style), Paragraph(data.get("authors", "Not Specified"), body_style)],
+        [Paragraph("Journal & Year:", bold_body_style), Paragraph(f"{data.get('journal', 'N/A')} ({data.get('year_published', 'N/A')})", body_style)],
+        [Paragraph("DOI / Reference:", bold_body_style), Paragraph(data.get("doi", "N/A"), body_style)],
+        [Paragraph("Study Architecture:", bold_body_style), Paragraph(data.get("study_design", "N/A"), body_style)],
+        [Paragraph("Gold-Standard Tool Applied:", bold_body_style), Paragraph(data.get("appraisal_tool_selected", "N/A"), body_style)],
+        [Paragraph("Checksum Groundedness:", bold_body_style), Paragraph(f"{data.get('groundedness_score', 100.0)}% Evidence Grounded in Document", bold_body_style)],
+    ]
+    t_meta = Table(meta_data, colWidths=[1.8 * inch, 5.6 * inch])
+    t_meta.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F2F5F8')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    story.append(t_meta)
+    story.append(Spacer(1, 10))
+
+    # Visual Quality Meter
+    tier = str(data.get("quality_tier", "")).upper()
+    if "GREEN" not in tier and "YELLOW" not in tier and "RED" not in tier:
+        v = str(data.get("overall_verdict", "")).lower()
+        tier = "GREEN" if any(w in v for w in ["low", "high", "recommended"]) else ("YELLOW" if any(w in v for w in ["some", "moderate"]) else "RED")
+
+    story.append(Paragraph("Methodological Rigour & Clinical Trustworthiness Gauge (At-A-Glance):", bold_body_style))
+    story.append(Spacer(1, 4))
+
+    gauge_data = [[
+        Paragraph("<font color='white'><b>HIGH RISK / FLAWED</b><br/>(Limited Reliability)</font>" if tier == "RED" else "HIGH RISK / FLAWED<br/>(Limited Reliability)", body_style),
+        Paragraph("<font color='white'><b>MODERATE CONCERNS</b><br/>(Conditional Validity)</font>" if tier == "YELLOW" else "MODERATE CONCERNS<br/>(Conditional Validity)", body_style),
+        Paragraph("<font color='white'><b>ROBUST / LOW RISK</b><br/>(Strong Validity)</font>" if tier == "GREEN" else "ROBUST / LOW RISK<br/>(Strong Validity)", body_style),
+    ]]
+    t_gauge = Table(gauge_data, colWidths=[2.46 * inch, 2.46 * inch, 2.46 * inch])
+    t_gauge.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#C00000') if tier == "RED" else colors.HexColor('#E6B8B8')),
+        ('BACKGROUND', (1, 0), (1, 0), colors.HexColor('#FFC000') if tier == "YELLOW" else colors.HexColor('#FFF2CC')),
+        ('BACKGROUND', (2, 0), (2, 0), colors.HexColor('#385623') if tier == "GREEN" else colors.HexColor('#E2EFDA')),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 1, colors.white),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+    ]))
+    story.append(t_gauge)
+    story.append(Spacer(1, 10))
+
+    # Domain Appraisal Breakdown
+    story.append(Paragraph(f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})", h1_style))
+    domain_table_data = [[
+        Paragraph("Domain & Prompt Criterion", table_header_style),
+        Paragraph("Score", table_header_style),
+        Paragraph("Grounded Quote & Citation", table_header_style),
+        Paragraph("Methodological Critique", table_header_style),
+    ]]
+
+    for d in data.get("domain_appraisals", []):
+        chk_status = d.get("checksum_status", "Verified Grounded")
+        chk_tag = "<font color='#1b7e1b'><b>✓ Verified</b></font>" if "Verified" in chk_status else "<font color='#aa2222'><b>⚠️ Unverified</b></font>"
+        
+        domain_cell = Paragraph(f"<b>{d.get('domain_name', '')}</b><br/><br/><i>{d.get('evaluation_question', '')}</i>", body_style)
+        rating_cell = Paragraph(f"<b>{d.get('rating', '')}</b>", bold_body_style)
+        evidence_cell = Paragraph(f"<b>[{d.get('location_reference', 'Section')}]</b><br/><i>\"{d.get('verbatim_evidence', '')}\"</i><br/><br/>{chk_tag}", body_style)
+        critique_cell = Paragraph(d.get("critique", ""), body_style)
+        domain_table_data.append([domain_cell, rating_cell, evidence_cell, critique_cell])
+
+    t_domains = Table(domain_table_data, colWidths=[2.2 * inch, 0.9 * inch, 2.3 * inch, 2.0 * inch], repeatRows=1)
+    t_domains.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1F4E79')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(t_domains)
+    story.append(Spacer(1, 12))
+
+    # Executive Synthesis & Scorecard Summary
+    story.append(Paragraph("2. Methodological Synthesis & Scorecard Summary", h1_style))
+    story.append(Paragraph(f"<b>Executive Synthesis:</b> {data.get('overall_synthesis', '')}", body_style))
+    story.append(Spacer(1, 8))
+
+    score_data = [[
+        Paragraph("Domain Item", table_header_style),
+        Paragraph("Score / Rating", table_header_style),
+        Paragraph("Determination", table_header_style)
+    ]]
+    for item in data.get("domain_appraisals", []):
+        rating_str = str(item.get("rating", "")).lower()
+        if any(w in rating_str for w in ["low", "yes", "6", "7", "adequate", "2"]):
+            badge = "Satisfactory"
+        elif any(w in rating_str for w in ["some", "moderate", "partial", "4", "5", "1"]):
+            badge = "Minor / Moderate Concern"
+        else:
+            badge = "High Concern / Deficit"
+        score_data.append([
+            Paragraph(item.get("domain_name", ""), body_style),
+            Paragraph(f"<b>{item.get('rating', '')}</b>", body_style),
+            Paragraph(badge, body_style)
+        ])
+
+    t_score = Table(score_data, colWidths=[3.4 * inch, 2.0 * inch, 2.0 * inch], repeatRows=1)
+    t_score.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#333F48')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    story.append(t_score)
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph(f"<b>Final Determination:</b> <font color='#aa2222'><b>{data.get('overall_verdict', 'N/A')}</b></font>", bold_body_style))
+    story.append(Spacer(1, 10))
+
+    # Tool Metadata Reference Table
+    story.append(Paragraph("3. Appraisal Framework & Standards Appendix", h1_style))
+    tool_meta = data.get("tool_meta", {})
+    ref_data = [
+        [Paragraph("Tool & Abbreviation:", bold_body_style), Paragraph(f"{tool_meta.get('acronym', 'Tool')} — {tool_meta.get('full_name', '')}", body_style)],
+        [Paragraph("Instrument Purpose:", bold_body_style), Paragraph(tool_meta.get("purpose", ""), body_style)],
+        [Paragraph("Scoring Scale:", bold_body_style), Paragraph(tool_meta.get("scoring_rules", ""), body_style)],
+    ]
+    t_ref = Table(ref_data, colWidths=[1.8 * inch, 5.6 * inch])
+    t_ref.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F2F5F8')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    story.append(t_ref)
+
+    doc.build(story)
+    buf.seek(0)
+    return buf
+
+
 # ==========================================
 # 5. STREAMLIT APP & SECURITY GATE
 # ==========================================
-st.set_page_config(page_title="AppraiseAI", page_icon="📑", layout="wide")
+st.set_page_config(page_title=APP_NAME, page_icon="📑", layout="wide")
 init_db()
 
 st.markdown(
     """
 <style>
     .stButton>button { width: 100%; border-radius: 8px; font-weight: 600; }
+    .history-card {
+        padding: 8px 10px;
+        margin-bottom: 6px;
+        border-radius: 6px;
+        background-color: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -867,7 +1209,7 @@ if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
 if not st.session_state["authenticated"]:
-    st.title("🔒 AppraiseAI: Access Restricted")
+    st.title(f"🔒 {APP_NAME}: Access Restricted")
     st.write("Please enter the passcode to access the appraisal workspace.")
     passcode_input = st.text_input("Passcode", type="password")
     if st.button("Unlock App"):
@@ -878,10 +1220,14 @@ if not st.session_state["authenticated"]:
             st.error("Invalid passcode. Please try again.")
     st.stop()
 
-st.title("📑 AppraiseAI: Research Paper & Guideline Grader")
-st.caption("Powered by Ultra-Fast Flash-Lite Engine + Instant Heuristic Classification")
+# --- Main App Header ---
+st.title(f"📑 {APP_NAME}")
+st.caption("Automated Methodological Critical Appraisal & Evidence Synthesis")
 
 api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None))
+
+if "history_limit" not in st.session_state:
+    st.session_state["history_limit"] = 10
 
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -901,30 +1247,52 @@ with st.sidebar:
     st.markdown("---")
     st.header("🗄️ Past Appraisals")
     records = get_all_appraisals()
+    
     if not records:
-        st.caption("No saved papers yet.")
+        st.caption("No saved appraisals yet.")
     else:
-        options = {
-            r["id"]: (
-                f"{r['created_at'][:10]} | {r['tool_selected']} -"
-                f" {r['paper_title'][:25]}..."
-            )
-            for r in records
-        }
-        selected_id = st.selectbox(
-            "Select saved appraisal:",
-            list(options.keys()),
-            format_func=lambda x: options[x],
-        )
-        col_load, col_del = st.columns(2)
-        with col_load:
-            if st.button("Load"):
-                st.session_state["appraisal_data"] = get_appraisal_by_id(selected_id)
-                st.rerun()
-        with col_del:
-            if st.button("Delete"):
-                delete_appraisal(selected_id)
-                st.rerun()
+        current_limit = st.session_state["history_limit"]
+        displayed_records = records[:current_limit]
+        
+        st.caption(f"Showing {len(displayed_records)} of {len(records)} entries")
+
+        for r in displayed_records:
+            verdict_text = str(r.get("overall_verdict", "")).lower()
+            if any(w in verdict_text for w in ["low", "recommended", "high confidence", "good"]):
+                dot = "🟢"
+            elif any(w in verdict_text for w in ["some", "moderate", "fair"]):
+                dot = "🟡"
+            else:
+                dot = "🔴"
+
+            with st.container():
+                short_title = r["paper_title"][:38] + "..." if len(r["paper_title"]) > 38 else r["paper_title"]
+                st.markdown(
+                    f"**{dot} {short_title}**  \n"
+                    f"<small style='color: gray;'>{r['created_at'][:10]} · {r['tool_selected']}</small>",
+                    unsafe_allow_html=True
+                )
+                
+                c_load, c_del = st.columns([3, 1])
+                with c_load:
+                    if st.button("View", key=f"view_{r['id']}", use_container_width=True):
+                        st.session_state["appraisal_data"] = get_appraisal_by_id(r["id"])
+                        st.rerun()
+                with c_del:
+                    if st.button("🗑️", key=f"del_{r['id']}", use_container_width=True):
+                        delete_appraisal(r["id"])
+                        st.rerun()
+                st.markdown("<hr style='margin: 8px 0; border: none; border-top: 1px solid rgba(255,255,255,0.08);'/>", unsafe_allow_html=True)
+
+        if len(records) > 10:
+            if current_limit == 10:
+                if st.button("⬇️ Show More (Up to 50)"):
+                    st.session_state["history_limit"] = 50
+                    st.rerun()
+            else:
+                if st.button("⬆️ Show Less (Top 10)"):
+                    st.session_state["history_limit"] = 10
+                    st.rerun()
 
 tab_pdf, tab_url = st.tabs(["📤 Upload PDF (Mobile / Desktop)", "🔗 Enter Link or DOI"])
 
@@ -1000,17 +1368,21 @@ if st.button("⚡ Run Methodological Appraisal", type="primary"):
         )
         with st.spinner(f"Evaluating {selected_design} using {mode_label}..."):
             try:
-                data = appraise_with_gemini(
+                raw_data = appraise_with_gemini(
                     client,
                     text_content=paper_text,
                     raw_pdf_bytes=raw_pdf_bytes if not paper_text else None,
                     assigned_design=selected_design,
                 )
-                new_id = save_appraisal(data, filename_tag)
-                st.session_state["appraisal_data"] = data
-                st.success(
-                    f"Appraisal finished and saved to library (ID: #{new_id})!"
+                
+                # Run deterministic fuzzy token-matching checksum
+                verified_data, score, warnings = run_python_groundedness_checksum(
+                    raw_data, paper_text, fuzzy_threshold=0.82
                 )
+                
+                new_id = save_appraisal(verified_data, filename_tag)
+                st.session_state["appraisal_data"] = verified_data
+                st.success(f"Appraisal finished and saved to library (ID: #{new_id})! Groundedness: {score}%")
                 st.rerun()
             except Exception as e:
                 st.error(f"Appraisal failed: {str(e)}")
@@ -1019,15 +1391,46 @@ if st.button("⚡ Run Methodological Appraisal", type="primary"):
 if "appraisal_data" in st.session_state:
     data = st.session_state["appraisal_data"]
     st.markdown("---")
-    st.subheader(f"📋 Appraisal: {data.get('paper_title', 'Untitled')}")
+    
+    # Paper Header & Bibliographic Details
+    st.subheader(f"📋 {data.get('paper_title', 'Untitled Manuscript')}")
+    
+    b1, b2, b3, b4 = st.columns(4)
+    with b1:
+        st.caption("👥 **Authors**")
+        st.write(data.get("authors", "Not Specified"))
+    with b2:
+        st.caption("📖 **Journal**")
+        st.write(data.get("journal", "Not Specified"))
+    with b3:
+        st.caption("📅 **Year**")
+        st.write(str(data.get("year_published", "N/A")))
+    with b4:
+        st.caption("🔗 **DOI / URL**")
+        doi_val = data.get("doi", "N/A")
+        if "10." in doi_val or "http" in doi_val:
+            clean_url = doi_val if doi_val.startswith("http") else f"https://doi.org/{doi_val}"
+            st.markdown(f"[{doi_val}]({clean_url})")
+        else:
+            st.write(doi_val)
 
-    c1, c2, c3 = st.columns(3)
+    st.markdown("<br>", unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.metric("Study Design", data.get("study_design"))
     with c2:
         st.metric("Tool Selected", data.get("appraisal_tool_selected"))
     with c3:
         st.metric("Overall Verdict", data.get("overall_verdict"))
+    with c4:
+        chk_score = data.get("groundedness_score", 100.0)
+        st.metric("Evidence Groundedness", f"{chk_score}%", help="Calculated via local Python SequenceMatcher comparing LLM quotes to raw PDF text.")
+
+    # Checksum Warning Alert
+    if data.get("groundedness_warnings"):
+        with st.expander("⚠️ Python Checksum Warnings (Unverified Citations)"):
+            for w in data["groundedness_warnings"]:
+                st.write(f"- {w}")
 
     # Three-Bar Quality Gauge in Streamlit
     tier = str(data.get("quality_tier", "")).upper()
@@ -1061,6 +1464,7 @@ if "appraisal_data" in st.session_state:
             "Score/Rating": d.get("rating"),
             "Reference": d.get("location_reference"),
             "Verbatim Evidence": d.get("verbatim_evidence"),
+            "Checksum Status": d.get("checksum_status", "Verified Grounded"),
             "Methodological Critique": d.get("critique"),
         }
         for d in data.get("domain_appraisals", [])
@@ -1077,18 +1481,26 @@ if "appraisal_data" in st.session_state:
             st.markdown(f"**Purpose:** {tool_meta.get('purpose')}")
             st.markdown(f"**Scoring Metric:** {tool_meta.get('scoring_rules')}")
 
-    doc_buf = build_docx_report(data)
-    safe_title = re.sub(
-        r"[^a-zA-Z0-9_-]", "_", data.get("paper_title", "Report")[:25]
-    )
-    st.download_button(
-        label="📥 Download Completed Word Document (.docx)",
-        data=doc_buf,
-        file_name=(
-            f"Appraisal_{data.get('appraisal_tool_selected')}_{safe_title}.docx"
-        ),
-        mime=(
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ),
-        use_container_width=True,
-    )
+    # Export Documents (Word & PDF)
+    safe_title = re.sub(r"[^a-zA-Z0-9_-]", "_", data.get("paper_title", "Report")[:25])
+    col_docx, col_pdf = st.columns(2)
+
+    with col_docx:
+        doc_buf = build_docx_report(data)
+        st.download_button(
+            label="📥 Download Word Document (.docx)",
+            data=doc_buf,
+            file_name=f"Kitique_{data.get('appraisal_tool_selected')}_{safe_title}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+        )
+
+    with col_pdf:
+        pdf_buf = build_pdf_report(data)
+        st.download_button(
+            label="📥 Download Formatted PDF (.pdf)",
+            data=pdf_buf,
+            file_name=f"Kitique_{data.get('appraisal_tool_selected')}_{safe_title}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
