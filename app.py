@@ -273,11 +273,16 @@ def appraise_with_gemini(
         contents.append(text_content)
 
     contents.append(
-        "Perform the full critical appraisal on this paper and return the JSON"
-        " object."
+        "Perform the full critical appraisal on this paper and return the JSON object."
     )
 
-    candidate_models = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-pro"]
+    # Active supported models ordered by priority
+    candidate_models = [
+        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-2.0-flash",
+    ]
+
     last_error = None
 
     for model_name in candidate_models:
@@ -296,9 +301,12 @@ def appraise_with_gemini(
             except Exception as e:
                 err_str = str(e)
                 last_error = e
+
+                # Handle high demand (503 / 429) with exponential backoff
                 if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str:
-                    time.sleep(2 * (attempt + 1))
+                    time.sleep(3 * (attempt + 1))
                     continue
+                # If model is not available for this key/region, break to next candidate
                 elif "404" in err_str or "NOT_FOUND" in err_str:
                     break
                 else:
@@ -324,9 +332,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
     run_t.font.bold = True
     run_t.font.color.rgb = RGBColor(31, 78, 121)
 
-    p_sub = doc.add_paragraph(
-        "Automated evidence synthesis evaluated via Google Gemini."
-    )
+    p_sub = doc.add_paragraph("Automated evidence synthesis evaluated via Google Gemini.")
     p_sub.runs[0].font.size = Pt(9.5)
     p_sub.runs[0].italic = True
 
@@ -335,10 +341,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
     fields = [
         ("Evaluated Title:", data.get("paper_title", "N/A")),
         ("Study Architecture:", data.get("study_design", "N/A")),
-        (
-            "Gold-Standard Tool Applied:",
-            data.get("appraisal_tool_selected", "N/A"),
-        ),
+        ("Gold-Standard Tool Applied:", data.get("appraisal_tool_selected", "N/A")),
         ("Overall Quality / Risk Verdict:", data.get("overall_verdict", "N/A")),
     ]
     for idx, (label, val) in enumerate(fields):
@@ -360,9 +363,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
     p_syn = doc.add_paragraph(data.get("overall_synthesis", ""))
     p_syn.paragraph_format.line_spacing = 1.15
 
-    doc.add_heading(
-        f"2. Domain Appraisal ({data.get('appraisal_tool_selected')})", level=1
-    )
+    doc.add_heading(f"2. Domain Appraisal ({data.get('appraisal_tool_selected')})", level=1)
     table = doc.add_table(rows=1, cols=4)
     table.style = "Table Grid"
     headers = [
@@ -382,9 +383,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
 
     for item in data.get("domain_appraisals", []):
         row_cells = table.add_row().cells
-        row_cells[0].paragraphs[0].add_run(item.get("domain_name", "")).bold = (
-            True
-        )
+        row_cells[0].paragraphs[0].add_run(item.get("domain_name", "")).bold = True
         row_cells[1].paragraphs[0].add_run(item.get("rating", "")).bold = True
 
         p_e = row_cells[2].paragraphs[0]
@@ -442,9 +441,7 @@ if not st.session_state["authenticated"]:
 st.title("📑 AppraiseAI: Research Paper & Guideline Grader")
 st.caption("Powered by Gemini | Automated Tool Selection & Word Export")
 
-api_key = st.secrets.get(
-    "GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None)
-)
+api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None))
 
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -456,6 +453,17 @@ with st.sidebar:
         )
     else:
         st.success("API Key Active")
+
+    # Diagnostic model inspector
+    if api_key and st.button("🔍 Check Accessible Models"):
+        try:
+            diag_client = genai.Client(api_key=api_key)
+            models_pager = diag_client.models.list()
+            active_ids = [m.name for m in models_pager if "generateContent" in getattr(m, "supported_actions", []) or "generateContent" in getattr(m, "supported_generation_methods", [])]
+            st.write("**Supported Models for your Key:**")
+            st.json(active_ids[:8] if active_ids else [m.name for m in models_pager][:8])
+        except Exception as e:
+            st.error(f"Could not fetch models: {e}")
 
     if st.button("Log Out"):
         st.session_state["authenticated"] = False
@@ -482,18 +490,14 @@ with st.sidebar:
         col_load, col_del = st.columns(2)
         with col_load:
             if st.button("Load"):
-                st.session_state["appraisal_data"] = get_appraisal_by_id(
-                    selected_id
-                )
+                st.session_state["appraisal_data"] = get_appraisal_by_id(selected_id)
                 st.rerun()
         with col_del:
             if st.button("Delete"):
                 delete_appraisal(selected_id)
                 st.rerun()
 
-tab_pdf, tab_url = st.tabs(
-    ["📤 Upload PDF (Mobile / Desktop)", "🔗 Enter Link or DOI"]
-)
+tab_pdf, tab_url = st.tabs(["📤 Upload PDF (Mobile / Desktop)", "🔗 Enter Link or DOI"])
 
 pdf_bytes = None
 url_text = None
@@ -530,19 +534,12 @@ if st.button("⚡ Run Methodological Appraisal", type="primary"):
         st.warning("Please upload a PDF or fetch an article URL first.")
     else:
         client = genai.Client(api_key=api_key)
-        with st.spinner(
-            "Gemini is classifying design, matching the tool, and evaluating"
-            " domains..."
-        ):
+        with st.spinner("Gemini is classifying design, matching the tool, and evaluating domains..."):
             try:
-                data = appraise_with_gemini(
-                    client, file_bytes=pdf_bytes, text_content=url_text
-                )
+                data = appraise_with_gemini(client, file_bytes=pdf_bytes, text_content=url_text)
                 new_id = save_appraisal(data, filename_tag)
                 st.session_state["appraisal_data"] = data
-                st.success(
-                    f"Appraisal finished and saved to library (ID: #{new_id})!"
-                )
+                st.success(f"Appraisal finished and saved to library (ID: #{new_id})!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Appraisal failed: {str(e)}")
@@ -577,17 +574,11 @@ if "appraisal_data" in st.session_state:
     st.dataframe(rows, use_container_width=True)
 
     doc_buf = build_docx_report(data)
-    safe_title = re.sub(
-        r"[^a-zA-Z0-9_-]", "_", data.get("paper_title", "Report")[:25]
-    )
+    safe_title = re.sub(r"[^a-zA-Z0-9_-]", "_", data.get("paper_title", "Report")[:25])
     st.download_button(
         label="📥 Download Completed Word Document (.docx)",
         data=doc_buf,
-        file_name=(
-            f"Appraisal_{data.get('appraisal_tool_selected')}_{safe_title}.docx"
-        ),
-        mime=(
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ),
+        file_name=f"Appraisal_{data.get('appraisal_tool_selected')}_{safe_title}.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         use_container_width=True,
     )
