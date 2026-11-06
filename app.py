@@ -650,7 +650,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     return buf
 
 
-st.set_page_config(page_title=APP_NAME, page_icon="🌿", layout="wide")
+st.set_page_config(page_title=APP_NAME, page_icon="🐱", layout="wide")
 init_db()
 
 # Pastel Seafoam Green UI Palette
@@ -716,7 +716,7 @@ if not st.session_state["authenticated"]:
             st.error("Invalid passcode.")
     st.stop()
 
-st.title(f"🌿 {APP_NAME}")
+st.title(f"🐱 {APP_NAME}")
 st.caption("Methodological Evidence Quality Synthesis & Diagnostic Review Engine")
 
 api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None))
