@@ -841,7 +841,6 @@ def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str
             continue
     raise RuntimeError("Failed to discover tool schema via production models.")
 
-
 def execute_manuscript_evaluation(
     client: genai.Client,
     text_content: Optional[str] = None,
@@ -851,7 +850,11 @@ def execute_manuscript_evaluation(
     strictness_mode: str = "Strict",
     classification_trace: Optional[dict] = None,
 ) -> dict:
-    active_tool_taxonomy = {assigned_design: active_tools_map[assigned_design]} if (assigned_design and active_tools_map and assigned_design in active_tools_map) else (active_tools_map or SEED_TAXONOMY)
+    active_tool_taxonomy = (
+        {assigned_design: active_tools_map[assigned_design]}
+        if (assigned_design and active_tools_map and assigned_design in active_tools_map)
+        else (active_tools_map or SEED_TAXONOMY)
+    )
     taxonomy_json = json.dumps(active_tool_taxonomy, indent=2)
 
     system_instruction = f"""
@@ -907,36 +910,71 @@ def execute_manuscript_evaluation(
     """
 
     clean_text = trim_manuscript_body(text_content) if text_content else ""
-    contents = [f"PAPER CONTENT:\n{clean_text}\n\nExecute appraisal and return JSON."] if (clean_text and len(clean_text.strip()) > 150) else (
-        [types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf"), f"Appraise for {assigned_design}."] if raw_pdf_bytes else None
-    )
-    if not contents:
+
+    contents = []
+    if clean_text and len(clean_text.strip()) > 150:
+        contents = [f"PAPER CONTENT:\n{clean_text}\n\nExecute appraisal and return JSON."]
+    elif raw_pdf_bytes:
+        contents = [
+            types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf"),
+            f"Execute the critical appraisal for {assigned_design} based on the document and return the JSON object."
+        ]
+    else:
         raise ValueError("No valid manuscript text or PDF bytes supplied.")
 
-    candidate_models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
+    # High-availability, production model cascade
+    candidate_models = [
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-2.5-flash",
+    ]
+
+    last_exception = None
 
     for model_name in candidate_models:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    response_mime_type="application/json",
-                    temperature=0.0,
-                ),
-            )
-            parsed = json.loads(response.text)
-            if classification_trace:
-                if "audit_log" not in parsed:
-                    parsed["audit_log"] = {}
-                parsed["audit_log"]["classification_trace"] = classification_trace
-            return parsed
-        except Exception:
-            time.sleep(1.0)
-            continue
+        for attempt in range(2):
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json",
+                        temperature=0.0,
+                    ),
+                )
+                
+                # Strip markdown fences if present
+                raw_text = response.text.strip()
+                if raw_text.startswith("```"):
+                    raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
+                    raw_text = re.sub(r"\n```$", "", raw_text)
 
-    raise RuntimeError("Appraisal pipeline exceeded retry threshold on production models.")
+                parsed = json.loads(raw_text)
+
+                if classification_trace:
+                    if "audit_log" not in parsed:
+                        parsed["audit_log"] = {}
+                    parsed["audit_log"]["classification_trace"] = classification_trace
+
+                return parsed
+
+            except Exception as e:
+                last_exception = e
+                err_str = str(e)
+                # If rate-limited or temporarily unavailable, pause and retry
+                if "429" in err_str or "503" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    time.sleep(2.0)
+                    continue
+                # If model is not found, break loop to next model candidate immediately
+                if "404" in err_str or "NOT_FOUND" in err_str:
+                    break
+                # Other errors, brief pause
+                time.sleep(1.0)
+
+    # Raise the actual underlying error from the last model attempted
+    raise RuntimeError(f"Appraisal pipeline failed on all models. Last error: {str(last_exception)}")
 
 
 def answer_interrogation_query(
