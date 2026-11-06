@@ -362,9 +362,6 @@ def extract_text_from_url(raw_input: str) -> str:
     return article.get_text(separator="\n", strip=True) if article else ""
 
 
-# ==========================================
-# 3. HARVARD CITATION & AUTHOR FORMATTER (MAX 3)
-# ==========================================
 def format_harvard_authors(raw_authors: str, max_authors: int = 3) -> str:
     if not raw_authors or str(raw_authors).strip().lower() in ["not specified", "unspecified", "unknown", "n/a", "none"]:
         return "Not Specified"
@@ -425,9 +422,6 @@ def format_harvard_filename(data: dict, extension: str) -> str:
     return re.sub(r"_+", "_", clean_filename)
 
 
-# ==========================================
-# 4. 4-SOURCE RANKED ENSEMBLE CLASSIFIER
-# ==========================================
 def extract_declared_design_ranked(text: str) -> Optional[Tuple[str, str, int]]:
     head = text[:6000].lower()
 
@@ -1052,7 +1046,7 @@ def answer_interrogation_query(
 
 
 # ==========================================
-# 5. DOCUMENT GENERATION (WORD & PDF)
+# 5. DOCUMENT GENERATION (WORD & CONCISE PDF)
 # ==========================================
 def build_docx_report(data: dict) -> io.BytesIO:
     doc = Document()
@@ -1151,67 +1145,57 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     doc = SimpleDocTemplate(
         buf,
         pagesize=letter,
-        rightMargin=36,
-        leftMargin=36,
-        topMargin=36,
-        bottomMargin=36
+        rightMargin=32,
+        leftMargin=32,
+        topMargin=28,
+        bottomMargin=28
     )
     styles = getSampleStyleSheet()
 
     title_style = ParagraphStyle(
         "T",
         parent=styles["Heading1"],
-        fontSize=18,
-        leading=22,
-        textColor=colors.HexColor("#4A8574"),
-        fontName="Helvetica-Bold",
-        spaceAfter=4,
-    )
-    h2_style = ParagraphStyle(
-        "H2",
-        parent=styles["Heading2"],
-        fontSize=12,
-        leading=16,
+        fontSize=15,
+        leading=18,
         textColor=colors.HexColor("#2C5247"),
         fontName="Helvetica-Bold",
-        spaceBefore=10,
-        spaceAfter=6,
+        spaceAfter=2,
+    )
+    sec_heading = ParagraphStyle(
+        "SH",
+        parent=styles["Heading2"],
+        fontSize=10,
+        leading=13,
+        textColor=colors.HexColor("#1D3B32"),
+        fontName="Helvetica-Bold",
+        spaceBefore=6,
+        spaceAfter=4,
     )
     body_style = ParagraphStyle(
         "B",
         parent=styles["Normal"],
-        fontSize=8.5,
-        leading=11.5,
+        fontSize=8,
+        leading=10.5,
         fontName="Helvetica",
     )
-    bold_style = ParagraphStyle(
-        "BB",
+    bold_style = ParagraphStyle("BB", parent=body_style, fontName="Helvetica-Bold")
+    header_style = ParagraphStyle("H", parent=body_style, fontName="Helvetica-Bold", textColor=colors.white)
+    quote_style = ParagraphStyle(
+        "Q",
         parent=body_style,
-        fontName="Helvetica-Bold",
-    )
-    header_style = ParagraphStyle(
-        "H",
-        parent=body_style,
-        fontName="Helvetica-Bold",
-        textColor=colors.white,
-    )
-    takeaway_style = ParagraphStyle(
-        "TA",
-        parent=body_style,
-        fontSize=8.5,
-        leading=12,
-        textColor=colors.HexColor("#1D3B32"),
+        fontSize=7.5,
+        leading=9.5,
+        textColor=colors.HexColor("#4A4A4A"),
+        fontName="Helvetica-Oblique",
     )
 
     story = [
-        Paragraph(f"{APP_NAME} — Methodological Evaluation", title_style),
-        Paragraph("<font color='#666666'><i>Standardized critical appraisal & translational synthesis</i></font>", body_style),
-        Spacer(1, 8),
+        Paragraph(f"{APP_NAME} — Clinical Evidence Appraisal", title_style),
+        Spacer(1, 4),
     ]
 
     ratings = data.get("ratings_summary", {})
     methodology_tier = str(ratings.get("methodology_quality", "")).upper()
-
     if "GOOD" in methodology_tier:
         active_tier = "GREEN"
     elif "POOR" in methodology_tier:
@@ -1229,201 +1213,131 @@ def build_pdf_report(data: dict) -> io.BytesIO:
 
     harvard_authors = format_harvard_authors(data.get("authors", "Not Specified"), max_authors=3)
 
+    # 1. Compact Header Metadata Bar
     meta_data = [
-        [Paragraph("Evaluated Title:", bold_style), Paragraph(data.get("paper_title", "N/A"), body_style)],
-        [Paragraph("Authors (Harvard):", bold_style), Paragraph(harvard_authors, body_style)],
-        [Paragraph("Journal & Year:", bold_style), Paragraph(f"{data.get('journal', 'N/A')} ({data.get('year_published', 'N/A')})", body_style)],
-        [Paragraph("Study Architecture:", bold_style), Paragraph(data.get("study_design", "N/A"), body_style)],
-        [Paragraph("Tool Applied:", bold_style), Paragraph(data.get("appraisal_tool_selected", "N/A"), body_style)],
-        [Paragraph("Quality Triad:", bold_style), Paragraph(f"Methodology: <b>{ratings.get('methodology_quality', 'N/A')}</b> | Reporting: <b>{ratings.get('reporting_quality', 'N/A')}</b> | Certainty: <b>{ratings.get('certainty_score', 'N/A')}</b>", body_style)],
-        [Paragraph("Overall Verdict:", bold_style), Paragraph(f"<font color='#9E2A2B'><b>{data.get('overall_verdict', 'N/A')}</b></font>", body_style)],
+        [
+            Paragraph(f"<b>Title:</b> {data.get('paper_title', 'N/A')}", body_style),
+            Paragraph(f"<b>Authors:</b> {harvard_authors} ({data.get('year_published', 'N/A')})", body_style),
+        ],
+        [
+            Paragraph(f"<b>Design:</b> {data.get('study_design', 'N/A')} | <b>Tool:</b> {data.get('appraisal_tool_selected', 'N/A')}", body_style),
+            Paragraph(f"<b>Quality Triad:</b> Method: <b>{ratings.get('methodology_quality', 'N/A')}</b> | Report: <b>{ratings.get('reporting_quality', 'N/A')}</b> | Certainty: <b>{ratings.get('certainty_score', 'N/A')}</b>", body_style),
+        ],
     ]
-    t_meta = Table(meta_data, colWidths=[1.8 * inch, 5.6 * inch])
+    t_meta = Table(meta_data, colWidths=[4.2 * inch, 3.4 * inch])
     t_meta.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#EBF5F2')),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1E7DF')),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#EBF5F2')),
+        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#78BBA6')),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1E7DF')),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
     ]))
     story.append(t_meta)
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 6))
 
-    story.append(Paragraph("<b>Methodological Trustworthiness Tier (At-A-Glance):</b>", bold_style))
-    story.append(Spacer(1, 4))
-
-    r_text = (
-        "<font color='white'><b>✓ HIGH RISK / POOR</b><br/><b>[ ✓ SELECTED TIER ]</b><br/>(Critical Deficits / High Bias)</font>"
-        if active_tier == "RED"
-        else "<font color='#7A7A7A'>HIGH RISK / POOR<br/>(Critical Deficits / High Bias)</font>"
-    )
-    y_text = (
-        "<font color='white'><b>✓ MODERATE / FAIR</b><br/><b>[ ✓ SELECTED TIER ]</b><br/>(Some Methodological Concerns)</font>"
-        if active_tier == "YELLOW"
-        else "<font color='#7A7A7A'>MODERATE / FAIR<br/>(Some Methodological Concerns)</font>"
-    )
-    g_text = (
-        "<font color='white'><b>✓ ROBUST / GOOD</b><br/><b>[ ✓ SELECTED TIER ]</b><br/>(Low Risk / High Methodological Rigour)</font>"
-        if active_tier == "GREEN"
-        else "<font color='#7A7A7A'>ROBUST / GOOD<br/>(Low Risk / High Methodological Rigour)</font>"
-    )
+    # 2. Visual Tier Banner
+    r_txt = "<b>✓ HIGH RISK / POOR</b>" if active_tier == "RED" else "HIGH RISK / POOR"
+    y_txt = "<b>✓ MODERATE / FAIR</b>" if active_tier == "YELLOW" else "MODERATE / FAIR"
+    g_txt = "<b>✓ ROBUST / GOOD</b>" if active_tier == "GREEN" else "ROBUST / GOOD"
 
     gauge_data = [[
-        Paragraph(r_text, body_style),
-        Paragraph(y_text, body_style),
-        Paragraph(g_text, body_style),
+        Paragraph(f"<font color='{'white' if active_tier == 'RED' else '#7A7A7A'}'>{r_txt}</font>", body_style),
+        Paragraph(f"<font color='{'white' if active_tier == 'YELLOW' else '#7A7A7A'}'>{y_txt}</font>", body_style),
+        Paragraph(f"<font color='{'white' if active_tier == 'GREEN' else '#7A7A7A'}'>{g_txt}</font>", body_style),
     ]]
-    t_gauge = Table(gauge_data, colWidths=[2.46 * inch, 2.46 * inch, 2.46 * inch])
-
-    gauge_styles = [
+    t_gauge = Table(gauge_data, colWidths=[2.53 * inch, 2.53 * inch, 2.53 * inch])
+    t_gauge.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#C0392B') if active_tier == "RED" else colors.HexColor('#FADBD8')),
         ('BACKGROUND', (1, 0), (1, 0), colors.HexColor('#D4AC0D') if active_tier == "YELLOW" else colors.HexColor('#FCF3CF')),
         ('BACKGROUND', (2, 0), (2, 0), colors.HexColor('#229954') if active_tier == "GREEN" else colors.HexColor('#D5F5E3')),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#BDC3C7')),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-    ]
-
-    active_col = 0 if active_tier == "RED" else (1 if active_tier == "YELLOW" else 2)
-    border_color = (
-        colors.HexColor('#78281F') if active_tier == "RED" else (
-            colors.HexColor('#7D6608') if active_tier == "YELLOW" else colors.HexColor('#145A32')
-        )
-    )
-    gauge_styles.append(('BOX', (active_col, 0), (active_col, 0), 2.5, border_color))
-    t_gauge.setStyle(TableStyle(gauge_styles))
-    story.append(t_gauge)
-    story.append(Spacer(1, 10))
-
-    takeaways = data.get("practical_takeaways", [])
-    if takeaways:
-        story.append(Paragraph("Practical Takeaways from the Paper (At-A-Glance):", h2_style))
-        takeaway_rows = []
-        for idx, item in enumerate(takeaways):
-            takeaway_rows.append([
-                Paragraph(f"<b>Key Takeaway #{idx + 1}:</b>", bold_style),
-                Paragraph(item, takeaway_style)
-            ])
-        t_takeaways = Table(takeaway_rows, colWidths=[1.8 * inch, 5.6 * inch])
-        t_takeaways.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F4F9F7')),
-            ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#78BBA6')),
-            ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1E7DF')),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ]))
-        story.append(t_takeaways)
-        story.append(Spacer(1, 10))
-
-    story_arc = data.get("narrative_arc_summary", [])
-    if story_arc:
-        story.append(Paragraph("Narrative Story Arc & Post-Grading Appraisal Journey:", h2_style))
-        story_rows = []
-        for idx, point in enumerate(story_arc):
-            story_rows.append([
-                Paragraph(f"<b>Step #{idx + 1}:</b>", bold_style),
-                Paragraph(point, takeaway_style)
-            ])
-        t_story = Table(story_rows, colWidths=[1.8 * inch, 5.6 * inch])
-        t_story.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F7FBF9')),
-            ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#A3D9C9')),
-            ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E1F2ED')),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ]))
-        story.append(t_story)
-        story.append(Spacer(1, 10))
-
-    story.append(Paragraph(f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})", h2_style))
-    domain_data = [[
-        Paragraph("Domain & Criterion", header_style),
-        Paragraph("Score", header_style),
-        Paragraph("Evidence", header_style),
-        Paragraph("Critique", header_style)
-    ]]
-    for d in data.get("domain_appraisals", []):
-        domain_data.append([
-            Paragraph(f"<b>{d.get('domain_name')}</b><br/><i>{d.get('evaluation_question')}</i>", body_style),
-            Paragraph(f"<b>{d.get('rating')}</b>", bold_style),
-            Paragraph(f"[{d.get('location_reference')}]<br/>\"{d.get('verbatim_evidence')}\"", body_style),
-            Paragraph(d.get("critique", ""), body_style),
-        ])
-    t_domains = Table(domain_data, colWidths=[2.2 * inch, 0.9 * inch, 2.3 * inch, 2.0 * inch], repeatRows=1)
-    t_domains.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#78BBA6')),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
     ]))
-    story.append(t_domains)
-    story.append(Spacer(1, 10))
+    story.append(t_gauge)
+    story.append(Spacer(1, 6))
 
-    # --- 2. Methodological Synthesis (Formatted in Clear, Distinct Points) ---
-    story.append(Paragraph("2. Methodological Synthesis & Discussion (Plain-English Points)", h2_style))
+    # 3. Two-Column Box: Practical Takeaways & Methodological Synthesis
+    takeaways = data.get("practical_takeaways", [])
     synth = data.get("overall_synthesis", [])
-    synth_rows = []
-    if isinstance(synth, list):
-        for idx, pt in enumerate(synth, 1):
-            synth_rows.append([
-                Paragraph(f"<b>Point {idx}:</b>", bold_style),
-                Paragraph(pt, takeaway_style)
-            ])
-    else:
-        synth_rows.append([
-            Paragraph("<b>Summary:</b>", bold_style),
-            Paragraph(str(synth), takeaway_style)
-        ])
 
-    t_synth = Table(synth_rows, colWidths=[1.8 * inch, 5.6 * inch])
-    t_synth.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F4F9F7')),
-        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#78BBA6')),
+    col_left = [Paragraph("<b>💡 Key Practical Takeaways</b>", sec_heading)]
+    for idx, item in enumerate(takeaways[:3], 1):
+        col_left.append(Paragraph(f"• <b>#{idx}:</b> {item}", body_style))
+        col_left.append(Spacer(1, 2))
+
+    col_right = [Paragraph("<b>🔍 Methodological Synthesis (Key Points)</b>", sec_heading)]
+    if isinstance(synth, list):
+        for pt in synth[:4]:
+            parts = pt.split(":", 1)
+            text = f"• <b>{parts[0]}:</b> {parts[1]}" if len(parts) == 2 else f"• {pt}"
+            col_right.append(Paragraph(text, body_style))
+            col_right.append(Spacer(1, 2))
+    else:
+        col_right.append(Paragraph(str(synth), body_style))
+
+    t_split = Table([[col_left, col_right]], colWidths=[3.75 * inch, 3.85 * inch])
+    t_split.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F7FBF9')),
+        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#A3D9C9')),
         ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1E7DF')),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
     ]))
-    story.append(t_synth)
-    story.append(Spacer(1, 10))
+    story.append(t_split)
+    story.append(Spacer(1, 8))
 
-    story.append(Paragraph("3. Appraisal Framework & Standards Appendix", h2_style))
+    # 4. Streamlined Domain Appraisal Table
+    story.append(Paragraph(f"<b>Domain-by-Domain Evaluation ({data.get('appraisal_tool_selected', 'Tool')})</b>", sec_heading))
+    domain_data = [[
+        Paragraph("Domain", header_style),
+        Paragraph("Rating", header_style),
+        Paragraph("Assessment & Grounded Evidence", header_style)
+    ]]
+
+    for d in data.get("domain_appraisals", []):
+        r_str = str(d.get("rating", ""))
+        quote = d.get("verbatim_evidence", "")
+        loc = d.get("location_reference", "")
+        critique = d.get("critique", "")
+
+        evidence_cell = [Paragraph(critique, body_style)]
+        if quote and quote.lower() not in ["none", "not reported", "n/a"]:
+            evidence_cell.append(Spacer(1, 2))
+            evidence_cell.append(Paragraph(f"[{loc}] \"{quote}\"", quote_style))
+
+        domain_data.append([
+            Paragraph(f"<b>{d.get('domain_name')}</b>", body_style),
+            Paragraph(f"<b>{r_str}</b>", bold_style),
+            evidence_cell
+        ])
+
+    t_domains = Table(domain_data, colWidths=[2.2 * inch, 1.0 * inch, 4.4 * inch], repeatRows=1)
+    t_style = [
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#78BBA6')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D0D0D0')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]
+    for i in range(1, len(domain_data)):
+        if i % 2 == 0:
+            t_style.append(('BACKGROUND', (0, i), (-1, i), colors.HexColor('#F9FCFB')))
+    t_domains.setStyle(TableStyle(t_style))
+    story.append(t_domains)
+    story.append(Spacer(1, 6))
+
+    # 5. Brief Footer Note
     tool_meta = data.get("tool_meta", {})
     acronym = tool_meta.get("acronym") or data.get("appraisal_tool_selected", "Tool")
     full_name = tool_meta.get("full_name") or "Standard Critical Appraisal Instrument"
-    purpose = tool_meta.get("purpose") or "Standardized epidemiological instrument used to assess study rigour and bias."
-    scoring_rules = tool_meta.get("scoring_rules") or "Standard qualitative rating or numerical score threshold."
-
-    design_match = SEED_TAXONOMY.get(data.get("study_design", ""))
-    if design_match:
-        if not full_name or full_name == "Standard Critical Appraisal Instrument":
-            full_name = design_match.get("full_name", full_name)
-        if not purpose or "Standardized epidemiological" in purpose:
-            purpose = design_match.get("purpose", purpose)
-        if not scoring_rules or "Standard qualitative" in scoring_rules:
-            scoring_rules = design_match.get("scale", scoring_rules)
-
-    appendix_rows = [
-        [Paragraph("Tool Acronym / Short Name:", bold_style), Paragraph(acronym, body_style)],
-        [Paragraph("Full Name of Instrument:", bold_style), Paragraph(f"<b>{full_name}</b>", body_style)],
-        [Paragraph("Methodological Purpose:", bold_style), Paragraph(purpose, body_style)],
-        [Paragraph("Scoring Scale & Thresholds:", bold_style), Paragraph(scoring_rules, body_style)],
-        [Paragraph("Clinical Interpretation:", bold_style), Paragraph("Findings appraised using this framework should be balanced against the patient population. Low risk of bias indicates strong internal validity, while highlighted deficiencies warrant caution prior to clinical implementation.", body_style)],
-    ]
-    t_app = Table(appendix_rows, colWidths=[1.8 * inch, 5.6 * inch])
-    t_app.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#EBF5F2')),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1E7DF')),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-    ]))
-    story.append(t_app)
+    story.append(Paragraph(
+        f"<font color='#555555'><b>Standard Applied:</b> {full_name} ({acronym}) — Validated epidemiological instrument. Appraisal generated via {APP_NAME}.</font>",
+        ParagraphStyle("Foot", parent=body_style, fontSize=7, leading=9)
+    ))
 
     doc.build(story)
     buf.seek(0)
