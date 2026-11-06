@@ -203,6 +203,7 @@ def extract_text_from_url(url: str) -> str:
     return article.get_text(separator="\n", strip=True)[:45000] if article else ""
 
 def appraise_with_gemini(client: genai.Client, file_bytes: bytes = None, text_content: str = None) -> dict:
+def appraise_with_gemini(client: genai.Client, file_bytes: bytes = None, text_content: str = None) -> dict:
     taxonomy_json = json.dumps(TOOL_TAXONOMY, indent=2)
 
     system_instruction = f"""
@@ -251,7 +252,7 @@ def appraise_with_gemini(client: genai.Client, file_bytes: bytes = None, text_co
 
     contents.append("Perform the full critical appraisal on this paper and return the JSON object.")
 
-   response = client.models.generate_content(
+    response = client.models.generate_content(
         model="gemini-3.8-flash",
         contents=contents,
         config=types.GenerateContentConfig(
@@ -261,7 +262,6 @@ def appraise_with_gemini(client: genai.Client, file_bytes: bytes = None, text_co
         )
     )
     return json.loads(response.text)
-
 # ==========================================
 # 4. WORD DOCUMENT GENERATION (.docx)
 # ==========================================
