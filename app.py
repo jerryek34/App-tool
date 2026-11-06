@@ -386,10 +386,9 @@ def extract_text_from_url(url: str) -> str:
 
 
 def classify_study_design_heuristically(text: str) -> str:
-    """Fast local pattern matching on title/abstract/methods to assign tool in <0.05 seconds."""
+    """Fast local pattern matching on title/abstract/methods in <0.05 seconds."""
     header_text = text[:7000].lower()
 
-    # Priority 1: Clinical Practice Guidelines & Consensus Statements
     if any(re.search(p, header_text) for p in [
         r"clinical\s+practice\s+guideline",
         r"consensus\s+statement",
@@ -399,7 +398,6 @@ def classify_study_design_heuristically(text: str) -> str:
     ]):
         return "Clinical Practice Guideline / Consensus Statement"
 
-    # Priority 2: Systematic Reviews & Meta-Analyses
     if any(re.search(p, header_text) for p in [
         r"systematic\s+review",
         r"meta-analysis",
@@ -408,7 +406,6 @@ def classify_study_design_heuristically(text: str) -> str:
     ]):
         return "Systematic Review / Meta-Analysis"
 
-    # Priority 3: Randomized Controlled Trials
     if any(re.search(p, header_text) for p in [
         r"randomised\s+controlled\s+trial",
         r"randomized\s+controlled\s+trial",
@@ -419,7 +416,6 @@ def classify_study_design_heuristically(text: str) -> str:
     ]):
         return "Randomized Controlled Trial (RCT)"
 
-    # Priority 4: Diagnostic Accuracy Studies
     if any(re.search(p, header_text) for p in [
         r"diagnostic\s+accuracy",
         r"sensitivity\s+and\s+specificity",
@@ -429,7 +425,6 @@ def classify_study_design_heuristically(text: str) -> str:
     ]):
         return "Diagnostic Accuracy Study"
 
-    # Priority 5: Qualitative Studies
     if any(re.search(p, header_text) for p in [
         r"qualitative\s+study",
         r"thematic\s+analysis",
@@ -440,7 +435,6 @@ def classify_study_design_heuristically(text: str) -> str:
     ]):
         return "Qualitative Study"
 
-    # Priority 6: Observational (Cohort / Case-Control)
     if any(re.search(p, header_text) for p in [
         r"cohort\s+study",
         r"prospective\s+cohort",
@@ -451,7 +445,6 @@ def classify_study_design_heuristically(text: str) -> str:
     ]):
         return "Observational Study (Cohort or Case-Control)"
 
-    # Priority 7: Non-randomized / Quasi-experimental
     if any(re.search(p, header_text) for p in [
         r"quasi-experimental",
         r"non-randomi[zs]ed",
@@ -476,7 +469,7 @@ def trim_manuscript_body(text: str) -> str:
     cut_pos = -1
     for marker in ref_markers:
         pos = lower.rfind(marker)
-        if pos != -1 and pos > (len(text) * 0.45):  # Must be in second half of paper
+        if pos != -1 and pos > (len(text) * 0.45):
             cut_pos = pos
             break
 
@@ -491,7 +484,6 @@ def appraise_with_gemini(
     raw_pdf_bytes: Optional[bytes] = None,
     assigned_design: Optional[str] = None,
 ) -> dict:
-    # Pass only the selected tool into the prompt to reduce token count and reasoning latency
     if assigned_design and assigned_design in TOOL_TAXONOMY:
         active_tool_taxonomy = {assigned_design: TOOL_TAXONOMY[assigned_design]}
     else:
@@ -564,16 +556,18 @@ def appraise_with_gemini(
     else:
         raise ValueError("No valid manuscript text or PDF bytes supplied.")
 
+    # High-throughput, lowest-latency priority models
     candidate_models = [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-2.5-flash-lite",
         "gemini-3.8-flash",
+        "gemini-2.0-flash",
     ]
 
     last_error = None
 
     for model_name in candidate_models:
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 response = client.models.generate_content(
                     model=model_name,
@@ -589,8 +583,9 @@ def appraise_with_gemini(
                 err_str = str(e)
                 last_error = e
 
+                # Fast failover: if busy (503/429), try once quickly, then jump to next model
                 if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str:
-                    time.sleep(2 * (attempt + 1))
+                    time.sleep(1.5)
                     continue
                 elif "404" in err_str or "NOT_FOUND" in err_str:
                     break
@@ -611,7 +606,6 @@ def set_cell_background(cell, fill_hex: str):
 def build_docx_report(data: dict) -> io.BytesIO:
     doc = Document()
 
-    # Document Header
     title = doc.add_heading(level=0)
     run_t = title.add_run("Critical Appraisal & Methodological Quality Report")
     run_t.font.size = Pt(20)
@@ -622,7 +616,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
     p_sub.runs[0].font.size = Pt(9.5)
     p_sub.runs[0].italic = True
 
-    # Study Overview Metadata Table
     meta_table = doc.add_table(rows=4, cols=2)
     meta_table.style = "Table Grid"
     fields = [
@@ -647,7 +640,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
 
     doc.add_paragraph("")
 
-    # --- THREE-BAR VISUAL QUALITY GAUGE ---
+    # Visual Quality Meter
     tier = str(data.get("quality_tier", "")).upper()
     if "GREEN" not in tier and "YELLOW" not in tier and "RED" not in tier:
         v = str(data.get("overall_verdict", "")).lower()
@@ -723,7 +716,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
     for item in data.get("domain_appraisals", []):
         row_cells = table.add_row().cells
 
-        # Col 0: Domain Name + Question Prompt for Context
         p_d = row_cells[0].paragraphs[0]
         r_name = p_d.add_run(f"{item.get('domain_name', '')}\n\n")
         r_name.bold = True
@@ -739,13 +731,11 @@ def build_docx_report(data: dict) -> io.BytesIO:
             r_qt.italic = True
             r_qt.font.size = Pt(8.5)
 
-        # Col 1: Score/Rating
         p_r = row_cells[1].paragraphs[0]
         r_sc = p_r.add_run(item.get("rating", ""))
         r_sc.bold = True
         r_sc.font.size = Pt(10)
 
-        # Col 2: Evidence & Section Location
         p_e = row_cells[2].paragraphs[0]
         loc = item.get("location_reference", "Section")
         r_loc = p_e.add_run(f"[{loc}]\n")
@@ -756,7 +746,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
         r_q.italic = True
         r_q.font.size = Pt(8.5)
 
-        # Col 3: Detailed Critique
         p_c = row_cells[3].paragraphs[0]
         r_crit = p_c.add_run(item.get("critique", ""))
         r_crit.font.size = Pt(9)
@@ -766,13 +755,11 @@ def build_docx_report(data: dict) -> io.BytesIO:
     # Section 2: Summary of Findings and Final Scorecard
     doc.add_heading("2. Summary of Findings & Final Scorecard", level=1)
 
-    # Narrative Summary
     doc.add_heading("Overall Methodological Synthesis", level=2)
     p_syn = doc.add_paragraph(data.get("overall_synthesis", ""))
     p_syn.paragraph_format.line_spacing = 1.15
     p_syn.runs[0].font.size = Pt(10)
 
-    # Final Scorecard Table
     doc.add_heading("Final Scorecard Summary", level=2)
     score_table = doc.add_table(rows=1, cols=3)
     score_table.style = "Table Grid"
@@ -815,7 +802,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
 
     doc.add_paragraph("")
 
-    # Section 3: Appraisal Standard Reference & Scoring Scale Appendix
+    # Section 3: Appraisal Standard Reference Appendix
     doc.add_heading("3. Standard Reference, Tool Abbreviation & Scoring Scales", level=1)
     
     tool_meta = data.get("tool_meta", {})
@@ -891,9 +878,8 @@ if not st.session_state["authenticated"]:
             st.error("Invalid passcode. Please try again.")
     st.stop()
 
-# --- Main App (Post Authentication) ---
 st.title("📑 AppraiseAI: Research Paper & Guideline Grader")
-st.caption("Powered by Gemini Fast Text Engine + Heuristic Pattern Matching")
+st.caption("Powered by Ultra-Fast Flash-Lite Engine + Instant Heuristic Classification")
 
 api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None))
 
@@ -980,12 +966,11 @@ with tab_url:
                 except Exception as e:
                     st.error(f"Failed to fetch content: {str(e)}")
 
-# Heuristic pattern recognition
+# Instant local pattern recognition
 detected_design = "Randomized Controlled Trial (RCT)"
 if paper_text:
     detected_design = classify_study_design_heuristically(paper_text)
 
-# Let user confirm or override Python's pattern recognition
 st.markdown("---")
 available_designs = list(TOOL_TAXONOMY.keys())
 default_idx = (
@@ -1085,7 +1070,6 @@ if "appraisal_data" in st.session_state:
     st.subheader("📝 Executive Summary & Findings")
     st.info(data.get("overall_synthesis"))
 
-    # Tool Metadata details
     tool_meta = data.get("tool_meta", {})
     if tool_meta:
         with st.expander("📖 Appraisal Framework & Scoring Standards"):
