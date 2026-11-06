@@ -530,19 +530,28 @@ def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.82) -> 
     return (best_ratio >= threshold), best_ratio
 
 
-def run_python_groundedness_checksum(
+def run_comprehensive_checksum(
     data: dict, full_raw_text: str, fuzzy_threshold: float = 0.82
-) -> Tuple[dict, float, List[str]]:
+) -> Tuple[dict, float, List[str], List[str]]:
+    """
+    Robust deterministic Python checksum:
+    1. Verifies verbatim quotes via sliding fuzzy token matching.
+    2. Checks for methodological contradictions (e.g. Green tier assigned despite high-risk domain).
+    3. Checks for architectural signals (e.g. RCT claims vs. randomization in text).
+    4. Audits empty evidence strings.
+    """
+    grounding_warnings: List[str] = []
+    flaw_warnings: List[str] = []
+
     if not full_raw_text or not full_raw_text.strip():
-        return data, 100.0, ["Source text unavailable for verification."]
+        return data, 100.0, ["Source text unavailable for verification."], ["Cannot verify integrity without source text."]
 
     domains = data.get("domain_appraisals", [])
     if not domains:
-        return data, 100.0, []
+        return data, 100.0, [], ["No domain appraisals populated."]
 
+    # --- CHECK 1: Evidence Groundedness Verification ---
     verified_count = 0
-    warnings = []
-
     for d in domains:
         quote = d.get("verbatim_evidence", "").strip()
         if not quote or quote.lower() in [
@@ -563,14 +572,73 @@ def run_python_groundedness_checksum(
             verified_count += 1
         else:
             d["checksum_status"] = f"Unverified Grounding ({int(ratio * 100)}% Max Similarity)"
-            warnings.append(
-                f"Quote in '{d.get('domain_name')}' matched at only {int(ratio * 100)}% (threshold: {int(fuzzy_threshold * 100)}%)."
+            grounding_warnings.append(
+                f"Quote in '{d.get('domain_name')}' matched at only {int(ratio * 100)}% against document text (threshold: {int(fuzzy_threshold * 100)}%)."
             )
 
     grounded_score = round((verified_count / len(domains)) * 100, 1)
+
+    # --- CHECK 2: Critical Methodological Contradiction Check ---
+    tier = str(data.get("quality_tier", "")).upper()
+    overall_verdict = str(data.get("overall_verdict", "")).lower()
+
+    # If categorized as Green/Robust, verify that no domain is scored as high risk
+    has_high_risk_domain = False
+    for d in domains:
+        rating_str = str(d.get("rating", "")).lower()
+        if any(term in rating_str for term in ["high risk", "serious risk", "critical risk", "critically low", "score 0", "1/7"]):
+            has_high_risk_domain = True
+            break
+
+    if "GREEN" in tier and has_high_risk_domain:
+        flaw_warnings.append(
+            "Methodological Contradiction: Overall Tier assigned as 'GREEN' (Robust), but at least one core domain is flagged as High/Critical Risk."
+        )
+
+    if any(good in overall_verdict for good in ["low risk", "recommended", "high quality"]) and has_high_risk_domain:
+        flaw_warnings.append(
+            "Verdict Conflict: Overall verdict states Low Risk/High Quality, but critical domain deficits were detected."
+        )
+
+    # --- CHECK 3: Study Architecture Alignment Check ---
+    design = str(data.get("study_design", "")).lower()
+    text_sample = full_raw_text[:12000].lower()
+
+    if "randomized controlled trial" in design and not any(
+        term in text_sample for term in ["random", "trial", "allocation", "rct", "group"]
+    ):
+        flaw_warnings.append(
+            "Design Alert: Classified as an RCT, but standard randomization/allocation terms are missing in the initial text."
+        )
+    elif "systematic review" in design and not any(
+        term in text_sample for term in ["systematic", "meta-analysis", "search", "prisma", "pubmed", "cochrane", "databases"]
+    ):
+        flaw_warnings.append(
+            "Design Alert: Classified as Systematic Review, but systematic search/PRISMA terms are missing in the initial text."
+        )
+    elif "clinical practice guideline" in design and not any(
+        term in text_sample for term in ["guideline", "recommendation", "consensus", "panel", "practice"]
+    ):
+        flaw_warnings.append(
+            "Design Alert: Classified as Guideline/Consensus, but clinical recommendation terms are sparse in the header."
+        )
+
+    # --- CHECK 4: Empty Evidence Audit ---
+    empty_evidence_domains = [
+        d.get("domain_name") for d in domains if not str(d.get("verbatim_evidence", "")).strip()
+    ]
+    if empty_evidence_domains:
+        flaw_warnings.append(
+            f"Evidence Gap: Missing verbatim citations in: {', '.join(empty_evidence_domains[:3])}."
+        )
+
+    # Populate final verification dictionary
     data["groundedness_score"] = grounded_score
-    data["groundedness_warnings"] = warnings
-    return data, grounded_score, warnings
+    data["groundedness_warnings"] = grounding_warnings
+    data["checksum_flaws"] = flaw_warnings
+    data["checksum_passed"] = len(flaw_warnings) == 0 and grounded_score >= 70.0
+
+    return data, grounded_score, grounding_warnings, flaw_warnings
 
 
 def execute_manuscript_evaluation(
@@ -718,8 +786,11 @@ def build_docx_report(data: dict) -> io.BytesIO:
     p_sub.runs[0].font.size = Pt(9.5)
     p_sub.runs[0].italic = True
 
-    meta_table = doc.add_table(rows=7, cols=2)
+    meta_table = doc.add_table(rows=8, cols=2)
     meta_table.style = "Table Grid"
+    
+    chk_status_text = "PASSED (Zero Critical Flaws)" if data.get("checksum_passed", True) else "REVIEW REQUIRED (Flaws Detected)"
+    
     fields = [
         ("Evaluated Title:", data.get("paper_title", "N/A")),
         ("Authors:", data.get("authors", "Not Specified")),
@@ -727,7 +798,8 @@ def build_docx_report(data: dict) -> io.BytesIO:
         ("DOI / Reference:", data.get("doi", "N/A")),
         ("Study Architecture:", data.get("study_design", "N/A")),
         ("Gold-Standard Tool Applied:", data.get("appraisal_tool_selected", "N/A")),
-        ("Source Groundedness Verification:", f"{data.get('groundedness_score', 100.0)}% Evidence Verified in Source Text"),
+        ("Evidence Groundedness:", f"{data.get('groundedness_score', 100.0)}% Grounded in Source Text"),
+        ("Methodological Checksum:", chk_status_text),
     ]
     for idx, (label, val) in enumerate(fields):
         row = meta_table.rows[idx]
@@ -742,6 +814,9 @@ def build_docx_report(data: dict) -> io.BytesIO:
         if idx == 6:
             r1.bold = True
             r1.font.color.rgb = RGBColor(40, 120, 40) if data.get('groundedness_score', 100.0) >= 80 else RGBColor(180, 40, 40)
+        elif idx == 7:
+            r1.bold = True
+            r1.font.color.rgb = RGBColor(40, 120, 40) if data.get("checksum_passed", True) else RGBColor(180, 40, 40)
 
     doc.add_paragraph("")
 
@@ -760,9 +835,9 @@ def build_docx_report(data: dict) -> io.BytesIO:
     bar_table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
     cols_spec = [
-        ("RED", "C00000", "E6B8B8", "HIGH RISK / FLAWED\n(Limited Reliability)"),
-        ("YELLOW", "FFC000", "FFF2CC", "MODERATE / SOME CONCERNS\n(Conditional Validity)"),
-        ("GREEN", "385623", "E2EFDA", "ROBUST / LOW RISK\n(Strong Clinical Validity)"),
+        ("RED", "C00000", "F2D7D5", "HIGH RISK / FLAWED\n(Limited Reliability)"),
+        ("YELLOW", "D4AC0D", "FCF3CF", "MODERATE / SOME CONCERNS\n(Conditional Validity)"),
+        ("GREEN", "229954", "D5F5E3", "ROBUST / LOW RISK\n(Strong Clinical Validity)"),
     ]
 
     for i, (b_tier, active_hex, inactive_hex, label) in enumerate(cols_spec):
@@ -772,19 +847,33 @@ def build_docx_report(data: dict) -> io.BytesIO:
         set_cell_background(cell, fill_hex)
         p = cell.paragraphs[0]
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.add_run(label)
+        
+        display_label = f"✓ {label}" if is_active else label
+        run = p.add_run(display_label)
         run.bold = is_active
         run.font.size = Pt(8.5)
-        run.font.color.rgb = RGBColor(255, 255, 255) if is_active else RGBColor(80, 80, 80)
+        run.font.color.rgb = RGBColor(255, 255, 255) if is_active else RGBColor(100, 100, 100)
+        
         if is_active:
             p_ind = cell.add_paragraph()
             p_ind.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            r_ind = p_ind.add_run("▲ ASSIGNED QUALITY TIER ▲")
+            r_ind = p_ind.add_run("▲ [ ✓ ASSIGNED TIER ] ▲")
             r_ind.bold = True
             r_ind.font.size = Pt(8.5)
             r_ind.font.color.rgb = RGBColor(255, 255, 255)
 
     doc.add_paragraph("")
+
+    # Checksum Alerts Section if Flaws Exist
+    flaws = data.get("checksum_flaws", [])
+    if flaws:
+        doc.add_heading("⚠️ Methodological Checksum & Integrity Audit", level=2)
+        for f in flaws:
+            p_flaw = doc.add_paragraph(style='List Bullet')
+            r_f = p_flaw.add_run(f)
+            r_f.font.size = Pt(9.5)
+            r_f.font.color.rgb = RGBColor(170, 30, 30)
+        doc.add_paragraph("")
 
     # Section 1: Detailed Question-by-Question Domain Appraisal
     doc.add_heading(
@@ -1018,6 +1107,12 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(Paragraph(f"{APP_NAME} — Methodological Evaluation", title_style))
     story.append(Paragraph("Automated critical evidence synthesis and methodological assessment report.", sub_style))
 
+    chk_status_text = (
+        "<font color='#1b7e1b'><b>PASSED (Zero Critical Flaws)</b></font>"
+        if data.get("checksum_passed", True)
+        else "<font color='#aa2222'><b>REVIEW REQUIRED (Flaws Detected)</b></font>"
+    )
+
     meta_data = [
         [Paragraph("Evaluated Title:", bold_body_style), Paragraph(data.get("paper_title", "N/A"), body_style)],
         [Paragraph("Authors:", bold_body_style), Paragraph(data.get("authors", "Not Specified"), body_style)],
@@ -1025,7 +1120,8 @@ def build_pdf_report(data: dict) -> io.BytesIO:
         [Paragraph("DOI / Reference:", bold_body_style), Paragraph(data.get("doi", "N/A"), body_style)],
         [Paragraph("Study Architecture:", bold_body_style), Paragraph(data.get("study_design", "N/A"), body_style)],
         [Paragraph("Gold-Standard Tool Applied:", bold_body_style), Paragraph(data.get("appraisal_tool_selected", "N/A"), body_style)],
-        [Paragraph("Checksum Groundedness:", bold_body_style), Paragraph(f"{data.get('groundedness_score', 100.0)}% Evidence Grounded in Document", bold_body_style)],
+        [Paragraph("Evidence Groundedness:", bold_body_style), Paragraph(f"{data.get('groundedness_score', 100.0)}% Evidence Grounded in Document", bold_body_style)],
+        [Paragraph("Methodological Checksum:", bold_body_style), Paragraph(chk_status_text, body_style)],
     ]
     t_meta = Table(meta_data, colWidths=[1.8 * inch, 5.6 * inch])
     t_meta.setStyle(TableStyle([
@@ -1046,25 +1142,62 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(Paragraph("Methodological Rigour & Clinical Trustworthiness Gauge (At-A-Glance):", bold_body_style))
     story.append(Spacer(1, 4))
 
+    r_text = (
+        "<font color='white'><b>✓ HIGH RISK / FLAWED</b><br/><b>[ ✓ SELECTED TIER ]</b><br/>(Limited Reliability)</font>"
+        if tier == "RED"
+        else "<font color='#777777'>HIGH RISK / FLAWED<br/>(Limited Reliability)</font>"
+    )
+    y_text = (
+        "<font color='white'><b>✓ MODERATE CONCERNS</b><br/><b>[ ✓ SELECTED TIER ]</b><br/>(Conditional Validity)</font>"
+        if tier == "YELLOW"
+        else "<font color='#777777'>MODERATE CONCERNS<br/>(Conditional Validity)</font>"
+    )
+    g_text = (
+        "<font color='white'><b>✓ ROBUST / LOW RISK</b><br/><b>[ ✓ SELECTED TIER ]</b><br/>(Strong Clinical Validity)</font>"
+        if tier == "GREEN"
+        else "<font color='#777777'>ROBUST / LOW RISK<br/>(Strong Clinical Validity)</font>"
+    )
+
     gauge_data = [[
-        Paragraph("<font color='white'><b>HIGH RISK / FLAWED</b><br/>(Limited Reliability)</font>" if tier == "RED" else "HIGH RISK / FLAWED<br/>(Limited Reliability)", body_style),
-        Paragraph("<font color='white'><b>MODERATE CONCERNS</b><br/>(Conditional Validity)</font>" if tier == "YELLOW" else "MODERATE CONCERNS<br/>(Conditional Validity)", body_style),
-        Paragraph("<font color='white'><b>ROBUST / LOW RISK</b><br/>(Strong Validity)</font>" if tier == "GREEN" else "ROBUST / LOW RISK<br/>(Strong Validity)", body_style),
+        Paragraph(r_text, body_style),
+        Paragraph(y_text, body_style),
+        Paragraph(g_text, body_style),
     ]]
     t_gauge = Table(gauge_data, colWidths=[2.46 * inch, 2.46 * inch, 2.46 * inch])
-    t_gauge.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#C00000') if tier == "RED" else colors.HexColor('#E6B8B8')),
-        ('BACKGROUND', (1, 0), (1, 0), colors.HexColor('#FFC000') if tier == "YELLOW" else colors.HexColor('#FFF2CC')),
-        ('BACKGROUND', (2, 0), (2, 0), colors.HexColor('#385623') if tier == "GREEN" else colors.HexColor('#E2EFDA')),
+    
+    gauge_styles = [
+        ('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#C0392B') if tier == "RED" else colors.HexColor('#FADBD8')),
+        ('BACKGROUND', (1, 0), (1, 0), colors.HexColor('#D4AC0D') if tier == "YELLOW" else colors.HexColor('#FCF3CF')),
+        ('BACKGROUND', (2, 0), (2, 0), colors.HexColor('#229954') if tier == "GREEN" else colors.HexColor('#D5F5E3')),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('GRID', (0, 0), (-1, -1), 1, colors.white),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-    ]))
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#BDC3C7')),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+    ]
+
+    active_col = 0 if tier == "RED" else (1 if tier == "YELLOW" else 2)
+    border_color = (
+        colors.HexColor('#78281F') if tier == "RED" else (
+            colors.HexColor('#7D6608') if tier == "YELLOW" else colors.HexColor('#145A32')
+        )
+    )
+    gauge_styles.append(('BOX', (active_col, 0), (active_col, 0), 2.5, border_color))
+
+    t_gauge.setStyle(TableStyle(gauge_styles))
     story.append(t_gauge)
     story.append(Spacer(1, 10))
 
+    # Flaws Warning if any
+    flaws = data.get("checksum_flaws", [])
+    if flaws:
+        story.append(Paragraph("Methodological Flaw & Contradiction Alerts:", h1_style))
+        for f in flaws:
+            story.append(Paragraph(f"<font color='#aa2222'>• {f}</font>", body_style))
+            story.append(Spacer(1, 3))
+        story.append(Spacer(1, 6))
+
+    # Detailed Domain Table
     story.append(Paragraph(f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})", h1_style))
     domain_table_data = [[
         Paragraph("Domain & Prompt Criterion", table_header_style),
@@ -1094,6 +1227,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_domains)
     story.append(Spacer(1, 12))
 
+    # Executive Synthesis & Scorecard Summary
     story.append(Paragraph("2. Methodological Synthesis & Scorecard Summary", h1_style))
     story.append(Paragraph(f"<b>Executive Synthesis:</b> {data.get('overall_synthesis', '')}", body_style))
     story.append(Spacer(1, 8))
@@ -1131,6 +1265,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(Paragraph(f"<b>Final Determination:</b> <font color='#aa2222'><b>{data.get('overall_verdict', 'N/A')}</b></font>", bold_body_style))
     story.append(Spacer(1, 10))
 
+    # Tool Metadata Reference Table
     story.append(Paragraph("3. Appraisal Framework & Standards Appendix", h1_style))
     tool_meta = data.get("tool_meta", {})
     ref_data = [
@@ -1347,13 +1482,16 @@ if st.button("⚡ Run Methodological Appraisal", type="primary"):
                     assigned_design=selected_design,
                 )
                 
-                verified_data, score, warnings = run_python_groundedness_checksum(
+                # Run multi-layered checksum (Groundedness + Contradiction + Architecture checks)
+                verified_data, score, grounding_warns, flaw_warns = run_comprehensive_checksum(
                     raw_data, paper_text, fuzzy_threshold=0.82
                 )
                 
                 new_id = save_appraisal(verified_data, filename_tag)
                 st.session_state["appraisal_data"] = verified_data
-                st.success(f"Appraisal finished and saved to library (ID: #{new_id})! Groundedness: {score}%")
+                
+                chk_msg = "PASSED" if verified_data.get("checksum_passed") else "REVIEW REQUIRED"
+                st.success(f"Appraisal finished and saved (ID: #{new_id})! Groundedness: {score}% | Status: {chk_msg}")
                 st.rerun()
             except Exception as e:
                 st.error(f"Appraisal failed: {str(e)}")
@@ -1395,11 +1533,19 @@ if "appraisal_data" in st.session_state:
         st.metric("Overall Verdict", data.get("overall_verdict"))
     with c4:
         chk_score = data.get("groundedness_score", 100.0)
-        st.metric("Evidence Groundedness", f"{chk_score}%", help="Calculated via local SequenceMatcher comparing extracted quotes to raw PDF text.")
+        is_passed = data.get("checksum_passed", True)
+        status_label = "🟢 Passed" if is_passed else "🔴 Review Needed"
+        st.metric("Integrity Checksum", f"{chk_score}%", delta=status_label, help="Multi-layered local checksum validating evidence quotes, design alignment, and rating consistency.")
 
-    # Checksum Warning Alert
+    # Critical Flaws and Contradictions Alert Box
+    if data.get("checksum_flaws"):
+        st.error("🚨 **Critical Flaw / Inconsistency Alerts Detected:**")
+        for flaw in data["checksum_flaws"]:
+            st.markdown(f"- **{flaw}**")
+
+    # Unverified Citation Notice
     if data.get("groundedness_warnings"):
-        with st.expander("⚠️ Groundedness Check Warnings (Unverified Citations)"):
+        with st.expander("⚠️ Citation Grounding Warnings"):
             for w in data["groundedness_warnings"]:
                 st.write(f"- {w}")
 
@@ -1413,17 +1559,17 @@ if "appraisal_data" in st.session_state:
     g_col1, g_col2, g_col3 = st.columns(3)
     with g_col1:
         if tier == "RED":
-            st.error("🚨 **RED TIER**\nHigh Risk / Methodological Flaws")
+            st.error("🚨 **[ ✓ SELECTED ] RED TIER**\nHigh Risk / Methodological Flaws")
         else:
             st.caption("Red (High Risk)")
     with g_col2:
         if tier == "YELLOW":
-            st.warning("⚠️ **YELLOW TIER**\nModerate Quality / Some Concerns")
+            st.warning("⚠️ **[ ✓ SELECTED ] YELLOW TIER**\nModerate Quality / Some Concerns")
         else:
             st.caption("Yellow (Moderate)")
     with g_col3:
         if tier == "GREEN":
-            st.success("✅ **GREEN TIER**\nRobust / Low Risk / Trustworthy")
+            st.success("✅ **[ ✓ SELECTED ] GREEN TIER**\nRobust / Low Risk / Trustworthy")
         else:
             st.caption("Green (Robust)")
 
