@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 from docx import Document
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Pt, RGBColor
 from google import genai
 from google.genai import types
 import requests
@@ -21,10 +21,12 @@ import streamlit as st
 # ==========================================
 DB_NAME = "appraisals.db"
 
+
 def get_connection():
     conn = sqlite3.connect(DB_NAME, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 def init_db():
     with get_connection() as conn:
@@ -42,25 +44,30 @@ def init_db():
         """)
         conn.commit()
 
+
 def save_appraisal(data: dict, source_name: str) -> int:
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO appraisals (
                 paper_title, study_design, tool_selected, 
                 overall_verdict, source_name, created_at, full_json
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            data.get("paper_title", "Untitled Manuscript"),
-            data.get("study_design", "Unknown"),
-            data.get("appraisal_tool_selected", "Unknown"),
-            data.get("overall_verdict", "Unknown"),
-            source_name,
-            datetime.now().strftime("%Y-%m-%d %H:%M"),
-            json.dumps(data)
-        ))
+        """,
+            (
+                data.get("paper_title", "Untitled Manuscript"),
+                data.get("study_design", "Unknown"),
+                data.get("appraisal_tool_selected", "Unknown"),
+                data.get("overall_verdict", "Unknown"),
+                source_name,
+                datetime.now().strftime("%Y-%m-%d %H:%M"),
+                json.dumps(data),
+            ),
+        )
         conn.commit()
         return cursor.lastrowid
+
 
 def get_all_appraisals() -> List[Dict]:
     with get_connection() as conn:
@@ -73,19 +80,24 @@ def get_all_appraisals() -> List[Dict]:
         """)
         return [dict(row) for row in cursor.fetchall()]
 
+
 def get_appraisal_by_id(appraisal_id: int) -> Optional[dict]:
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT full_json FROM appraisals WHERE id = ?", (appraisal_id,))
+        cursor.execute(
+            "SELECT full_json FROM appraisals WHERE id = ?", (appraisal_id,)
+        )
         row = cursor.fetchone()
         if row:
             return json.loads(row["full_json"])
         return None
 
+
 def delete_appraisal(appraisal_id: int):
     with get_connection() as conn:
         conn.execute("DELETE FROM appraisals WHERE id = ?", (appraisal_id,))
         conn.commit()
+
 
 # ==========================================
 # 2. APPRAISAL FRAMEWORKS & TAXONOMY
@@ -125,7 +137,10 @@ TOOL_TAXONOMY = {
             "Domain 6: Measurement of outcomes",
             "Domain 7: Selection of the reported result",
         ],
-        "scale": "Low Risk | Moderate Risk | Serious Risk | Critical Risk | No Information",
+        "scale": (
+            "Low Risk | Moderate Risk | Serious Risk | Critical Risk | No"
+            " Information"
+        ),
     },
     "Systematic Review / Meta-Analysis": {
         "tool": "AMSTAR 2",
@@ -202,8 +217,12 @@ def extract_text_from_url(url: str) -> str:
     article = soup.find("article") or soup.find("main") or soup.body
     return article.get_text(separator="\n", strip=True)[:45000] if article else ""
 
-def appraise_with_gemini(client: genai.Client, file_bytes: bytes = None, text_content: str = None) -> dict:
-def appraise_with_gemini(client: genai.Client, file_bytes: bytes = None, text_content: str = None) -> dict:
+
+def appraise_with_gemini(
+    client: genai.Client,
+    file_bytes: bytes = None,
+    text_content: str = None,
+) -> dict:
     taxonomy_json = json.dumps(TOOL_TAXONOMY, indent=2)
 
     system_instruction = f"""
@@ -246,11 +265,16 @@ def appraise_with_gemini(client: genai.Client, file_bytes: bytes = None, text_co
 
     contents = []
     if file_bytes:
-        contents.append(types.Part.from_bytes(data=file_bytes, mime_type="application/pdf"))
+        contents.append(
+            types.Part.from_bytes(data=file_bytes, mime_type="application/pdf")
+        )
     elif text_content:
         contents.append(text_content)
 
-    contents.append("Perform the full critical appraisal on this paper and return the JSON object.")
+    contents.append(
+        "Perform the full critical appraisal on this paper and return the JSON"
+        " object."
+    )
 
     response = client.models.generate_content(
         model="gemini-3.8-flash",
@@ -258,16 +282,19 @@ def appraise_with_gemini(client: genai.Client, file_bytes: bytes = None, text_co
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
             response_mime_type="application/json",
-            temperature=0.1
-        )
+            temperature=0.1,
+        ),
     )
     return json.loads(response.text)
+
+
 # ==========================================
 # 4. WORD DOCUMENT GENERATION (.docx)
 # ==========================================
 def set_cell_background(cell, fill_hex: str):
     shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
     cell._tc.get_or_add_tcPr().append(shd)
+
 
 def build_docx_report(data: dict) -> io.BytesIO:
     doc = Document()
@@ -278,7 +305,9 @@ def build_docx_report(data: dict) -> io.BytesIO:
     run_t.font.bold = True
     run_t.font.color.rgb = RGBColor(31, 78, 121)
 
-    p_sub = doc.add_paragraph("Automated evidence synthesis evaluated via Google Gemini 2.5.")
+    p_sub = doc.add_paragraph(
+        "Automated evidence synthesis evaluated via Google Gemini."
+    )
     p_sub.runs[0].font.size = Pt(9.5)
     p_sub.runs[0].italic = True
 
@@ -287,7 +316,10 @@ def build_docx_report(data: dict) -> io.BytesIO:
     fields = [
         ("Evaluated Title:", data.get("paper_title", "N/A")),
         ("Study Architecture:", data.get("study_design", "N/A")),
-        ("Gold-Standard Tool Applied:", data.get("appraisal_tool_selected", "N/A")),
+        (
+            "Gold-Standard Tool Applied:",
+            data.get("appraisal_tool_selected", "N/A"),
+        ),
         ("Overall Quality / Risk Verdict:", data.get("overall_verdict", "N/A")),
     ]
     for idx, (label, val) in enumerate(fields):
@@ -309,10 +341,17 @@ def build_docx_report(data: dict) -> io.BytesIO:
     p_syn = doc.add_paragraph(data.get("overall_synthesis", ""))
     p_syn.paragraph_format.line_spacing = 1.15
 
-    doc.add_heading(f"2. Domain Appraisal ({data.get('appraisal_tool_selected')})", level=1)
+    doc.add_heading(
+        f"2. Domain Appraisal ({data.get('appraisal_tool_selected')})", level=1
+    )
     table = doc.add_table(rows=1, cols=4)
     table.style = "Table Grid"
-    headers = ["Domain Evaluated", "Appraisal Score", "Verbatim Evidence & Citation", "Methodological Critique"]
+    headers = [
+        "Domain Evaluated",
+        "Appraisal Score",
+        "Verbatim Evidence & Citation",
+        "Methodological Critique",
+    ]
     for i, title_text in enumerate(headers):
         cell = table.rows[0].cells[i]
         set_cell_background(cell, "1F4E79")
@@ -324,9 +363,11 @@ def build_docx_report(data: dict) -> io.BytesIO:
 
     for item in data.get("domain_appraisals", []):
         row_cells = table.add_row().cells
-        row_cells[0].paragraphs[0].add_run(item.get("domain_name", "")).bold = True
+        row_cells[0].paragraphs[0].add_run(item.get("domain_name", "")).bold = (
+            True
+        )
         row_cells[1].paragraphs[0].add_run(item.get("rating", "")).bold = True
-        
+
         p_e = row_cells[2].paragraphs[0]
         loc = item.get("location_reference", "Section")
         r_loc = p_e.add_run(f"[{loc}]\n")
@@ -345,20 +386,22 @@ def build_docx_report(data: dict) -> io.BytesIO:
     buf.seek(0)
     return buf
 
+
 # ==========================================
 # 5. STREAMLIT APP & SECURITY GATE
 # ==========================================
 st.set_page_config(page_title="AppraiseAI", page_icon="📑", layout="wide")
 init_db()
 
-# Custom responsive styling
-st.markdown("""
+st.markdown(
+    """
 <style>
     .stButton>button { width: 100%; border-radius: 8px; font-weight: 600; }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-# Passcode Verification Gate
 CORRECT_PASSCODE = "324598"
 
 if "authenticated" not in st.session_state:
@@ -376,17 +419,22 @@ if not st.session_state["authenticated"]:
             st.error("Invalid passcode. Please try again.")
     st.stop()
 
-# --- Main App (Accessible after passcode verification) ---
+# --- Main App (Post Authentication) ---
 st.title("📑 AppraiseAI: Research Paper & Guideline Grader")
-st.caption("Powered by Gemini 2.5 Pro | Automated Tool Selection & Word Export")
+st.caption("Powered by Gemini | Automated Tool Selection & Word Export")
 
-# API Key Resolution
-api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None))
+api_key = st.secrets.get(
+    "GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None)
+)
 
 with st.sidebar:
     st.header("⚙️ Settings")
     if not api_key:
-        api_key = st.text_input("Gemini API Key", type="password", help="Enter your Google AI Studio API key")
+        api_key = st.text_input(
+            "Gemini API Key",
+            type="password",
+            help="Enter your Google AI Studio API key",
+        )
     else:
         st.success("API Key Active")
 
@@ -400,33 +448,52 @@ with st.sidebar:
     if not records:
         st.caption("No saved papers yet.")
     else:
-        options = {r["id"]: f"{r['created_at'][:10]} | {r['tool_selected']} - {r['paper_title'][:25]}..." for r in records}
-        selected_id = st.selectbox("Select saved appraisal:", list(options.keys()), format_func=lambda x: options[x])
+        options = {
+            r["id"]: (
+                f"{r['created_at'][:10]} | {r['tool_selected']} -"
+                f" {r['paper_title'][:25]}..."
+            )
+            for r in records
+        }
+        selected_id = st.selectbox(
+            "Select saved appraisal:",
+            list(options.keys()),
+            format_func=lambda x: options[x],
+        )
         col_load, col_del = st.columns(2)
         with col_load:
             if st.button("Load"):
-                st.session_state["appraisal_data"] = get_appraisal_by_id(selected_id)
+                st.session_state["appraisal_data"] = get_appraisal_by_id(
+                    selected_id
+                )
                 st.rerun()
         with col_del:
             if st.button("Delete"):
                 delete_appraisal(selected_id)
                 st.rerun()
 
-tab_pdf, tab_url = st.tabs(["📤 Upload PDF (Mobile / Desktop)", "🔗 Enter Link or DOI"])
+tab_pdf, tab_url = st.tabs(
+    ["📤 Upload PDF (Mobile / Desktop)", "🔗 Enter Link or DOI"]
+)
 
 pdf_bytes = None
 url_text = None
 filename_tag = "Paper"
 
 with tab_pdf:
-    uploaded = st.file_uploader("Upload Manuscript or Clinical Practice Guideline", type=["pdf"])
+    uploaded = st.file_uploader(
+        "Upload Manuscript or Clinical Practice Guideline", type=["pdf"]
+    )
     if uploaded:
         pdf_bytes = uploaded.read()
         filename_tag = uploaded.name
         st.success(f"Loaded `{uploaded.name}` ({len(pdf_bytes) // 1024} KB)")
 
 with tab_url:
-    url_input = st.text_input("Paste Article Link or DOI", placeholder="https://doi.org/10.1016/... or https://pubmed...")
+    url_input = st.text_input(
+        "Paste Article Link or DOI",
+        placeholder="https://doi.org/10.1016/... or https://pubmed...",
+    )
     if st.button("Fetch Article Content"):
         if url_input.strip():
             with st.spinner("Retrieving article..."):
@@ -444,12 +511,19 @@ if st.button("⚡ Run Methodological Appraisal", type="primary"):
         st.warning("Please upload a PDF or fetch an article URL first.")
     else:
         client = genai.Client(api_key=api_key)
-        with st.spinner("Gemini is classifying design, matching the tool, and evaluating domains..."):
+        with st.spinner(
+            "Gemini is classifying design, matching the tool, and evaluating"
+            " domains..."
+        ):
             try:
-                data = appraise_with_gemini(client, file_bytes=pdf_bytes, text_content=url_text)
+                data = appraise_with_gemini(
+                    client, file_bytes=pdf_bytes, text_content=url_text
+                )
                 new_id = save_appraisal(data, filename_tag)
                 st.session_state["appraisal_data"] = data
-                st.success(f"Appraisal finished and saved to library (ID: #{new_id})!")
+                st.success(
+                    f"Appraisal finished and saved to library (ID: #{new_id})!"
+                )
                 st.rerun()
             except Exception as e:
                 st.error(f"Appraisal failed: {str(e)}")
@@ -477,18 +551,24 @@ if "appraisal_data" in st.session_state:
             "Score/Rating": d.get("rating"),
             "Reference": d.get("location_reference"),
             "Verbatim Evidence": d.get("verbatim_evidence"),
-            "Methodological Critique": d.get("critique")
+            "Methodological Critique": d.get("critique"),
         }
         for d in data.get("domain_appraisals", [])
     ]
     st.dataframe(rows, use_container_width=True)
 
     doc_buf = build_docx_report(data)
-    safe_title = re.sub(r'[^a-zA-Z0-9_-]', '_', data.get("paper_title", "Report")[:25])
+    safe_title = re.sub(
+        r"[^a-zA-Z0-9_-]", "_", data.get("paper_title", "Report")[:25]
+    )
     st.download_button(
         label="📥 Download Completed Word Document (.docx)",
         data=doc_buf,
-        file_name=f"Appraisal_{data.get('appraisal_tool_selected')}_{safe_title}.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        use_container_width=True
+        file_name=(
+            f"Appraisal_{data.get('appraisal_tool_selected')}_{safe_title}.docx"
+        ),
+        mime=(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ),
+        use_container_width=True,
     )
