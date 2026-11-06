@@ -22,7 +22,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle, PageBreak, KeepTogether
 import requests
 import streamlit as st
 
@@ -938,86 +938,99 @@ def execute_manuscript_evaluation(
 
 
 # ==========================================
-# 5. FORENSIC DEEP-DIVE GENERATOR (NO BOILERPLATE, REAL ARITHMETIC)
+# 5. FORENSIC DEEP-DIVE GENERATOR (PUBLISHING/ACADEMIC RIGOUR)
 # ==========================================
 def generate_forensic_deep_dive(
     client: genai.Client,
     base_data: dict,
-    full_text: str = ""  # Kept for backward compatibility, but no longer re-passed in bulk
+    full_text: str = ""
 ) -> dict:
     """
-    High-speed forensic deep dive.
-    Locks the tool and awarded ratings from base_data so the architecture CANNOT change.
-    Evaluates in seconds by analyzing pre-extracted domain ratings rather than re-reading 35k chars.
+    Publication-grade academic forensic appraisal.
+    Hard-locks assigned appraisal framework from base_data so the design cannot drift.
+    Explains tool choice rationale, shows step-by-step arithmetic, strips boilerplate,
+    and conducts an in-depth substantive methodological autopsy.
     """
     locked_tool = base_data.get("appraisal_tool_selected", "Assigned Tool")
     locked_design = base_data.get("study_design", "Assigned Design")
     base_domains = base_data.get("domain_appraisals", [])
     overall_verdict = base_data.get("overall_verdict", "")
     nos_stars = base_data.get("nos_score_breakdown", {})
+    tool_meta = base_data.get("tool_meta", {})
 
-    # Strip raw text payload down to just title + methodology neighborhood to save tokens and latency
-    short_context = full_text[:4000] if full_text else ""
+    short_context = full_text[:8000] if full_text else ""
 
     deep_prompt = f"""
-    You are an expert clinical trial auditor and biostatistician.
-    
-    IMMUTABLE CONSTRAINTS:
-    - YOU MUST USE THE EXACT APPRAISAL TOOL ALREADY ASSIGNED: "{locked_tool}" ({locked_design}).
-    - DO NOT re-classify or change this study design.
-    - Base Verdict Already Awarded: {overall_verdict}
-    - Existing Domain Scores & Quotes:
+    You are a distinguished university professor of clinical epidemiology and biostatistics conducting a formal, publication-standard forensic appraisal report.
+
+    IMMUTABLE FRAMEWORK CONSTRAINT:
+    - YOU MUST AUDIT THIS PAPER UNDER THE EXACT ASSIGNED TOOL: "{locked_tool}" ({locked_design}).
+    - DO NOT switch or reclassify this tool.
+    - Base Verdict: {overall_verdict}
+    - Base Evaluated Domains:
     {json.dumps(base_domains, indent=1)}
-    
-    BASE NOS BREAKDOWN (if applicable):
+    - Base NOS Star Breakdown (if applicable):
     {json.dumps(nos_stars)}
 
-    CONTEXT EXCERPT:
+    MANUSCRIPT CONTEXT EXCERPT:
     {short_context}
 
-    YOUR SPECIFIC TASKS:
-    1. EXPLICIT ARITHMETIC SHOWN:
-       - Show the EXACT math for "{locked_tool}".
-       - For Newcastle-Ottawa Scale (NOS): Show Selection (X/4) + Comparability (Y/2) + Outcome (Z/3) = Total Stars / 9 and the exact percentage.
-       - For AMSTAR 2 / Cochrane RoB 2 / ROBINS-I / QUADAS-2: Calculate the exact proportion of Low vs Some Concerns vs High Risk domains, tally critical flaws, and show the arithmetic rule that determined "{overall_verdict}".
-       - For AGREE II: Show the standardized % calculation: (Obtained - Min) / (Max - Min) * 100.
-    2. ZERO BOILERPLATE:
-       - No textbook filler (e.g. do NOT say 'blinding is important because it prevents bias'). Jump directly to empirical facts from the paper.
-    3. AT LEAST 2 TO 3 SUBSTANTIVE CONTENT CRITICISMS:
-       - Detail deep, specific methodological or statistical vulnerabilities (e.g., confounding by indication, immortal time bias, survivorship bias, underpowered sample, missing confounder adjustment).
+    AUDIT OBJECTIVES & REQUIREMENTS (PUBLISHING-GRADE RIGOUR):
+    1. TOOL SELECTION RATIONALE & COMPARATIVE JUSTIFICATION:
+       - Explain with formal academic reasoning why "{locked_tool}" was methodologically mandated for this manuscript architecture ({locked_design}).
+       - Contrast it against competing frameworks (e.g. why AMSTAR 2 instead of SANRA; why NOS Cohort instead of cross-sectional AXIS or randomized RoB 2; or why ROBINS-I was necessary).
+    2. EXPLICIT STEP-BY-STEP MATHEMATICAL ARITHMETIC:
+       - Show the exact arithmetic derivation leading to "{overall_verdict}".
+       - If Newcastle-Ottawa Scale: Detail Selection (X/4) + Comparability (Y/2) + Outcome (Z/3) = Total Stars / 9, plus scaled percentage.
+       - If Cochrane RoB 2 / AMSTAR 2 / ROBINS-I / QUADAS-2: Calculate the exact proportion of Low Risk vs High Risk vs Some Concerns, count critical domain violations, and demonstrate the decision gate threshold.
+       - If AGREE II: Calculate (Obtained Score - Minimum) / (Maximum - Minimum) × 100%.
+    3. ZERO RISK-OF-BIAS BOILERPLATE:
+       - Strip all generic textbook filler. Do NOT write generic explanations like 'Randomization balances confounders'.
+       - Jump directly to concrete empirical facts: exact sample sizes, attrition percentages, confidence intervals, unmeasured covariates, selective reporting, or follow-up timelines.
+    4. AT LEAST 2 TO 3 SUBSTANTIVE CONTENT CRITICISMS:
+       - Detail deep, specific methodological vulnerabilities (e.g., immortal time bias, confounding by indication, survivorship bias, underpowered sample, surrogate vs hard endpoint discordance).
+    5. DETAILED DOMAIN AUTOPSY:
+       - Walk through each domain evaluated, providing forensic empirical observations and statistical impact.
 
-    Output ONLY a valid JSON object matching this schema:
+    CRITICAL: Output ONLY a valid JSON object matching:
     {{
+      "tool_selection_rationale": {{
+        "assigned_tool": "{locked_tool}",
+        "architecture_classification": "{locked_design}",
+        "selection_justification": "Detailed academic rationale explaining why this tool is gold-standard for this design.",
+        "competing_tools_rejected": "Comparison against other instruments and why they were inappropriate for this inquiry."
+      }},
       "arithmetic_breakdown": {{
-        "formula_used": "Exact equation or threshold rule for {locked_tool}",
-        "step_by_step_calculation": "Step-by-step arithmetic showing how the score was calculated",
+        "formula_used": "Exact mathematical equation or grading rule",
+        "step_by_step_calculation": "Step-by-step arithmetic derivation",
         "final_tally": "Numerical score, star ratio, or percentage"
       }},
       "substantive_criticisms": [
         {{
-          "flaw_title": "Deficit Name 1",
-          "manuscript_evidence": "Exact numbers, sample counts, or paper facts",
+          "flaw_title": "Deficit 1",
+          "manuscript_evidence": "Exact numbers, line citations, or empirical data",
           "epidemiological_impact": "Direct scientific impact on validity"
         }},
         {{
-          "flaw_title": "Deficit Name 2",
-          "manuscript_evidence": "Exact numbers, sample counts, or paper facts",
+          "flaw_title": "Deficit 2",
+          "manuscript_evidence": "Exact numbers, line citations, or empirical data",
           "epidemiological_impact": "Direct scientific impact on validity"
         }},
         {{
-          "flaw_title": "Deficit Name 3",
-          "manuscript_evidence": "Exact numbers, sample counts, or paper facts",
+          "flaw_title": "Deficit 3",
+          "manuscript_evidence": "Exact numbers, line citations, or empirical data",
           "epidemiological_impact": "Direct scientific impact on validity"
         }}
       ],
       "domain_deep_dives": [
         {{
-          "domain_name": "Domain Title from base appraisal",
-          "score_awarded": "Same score from base appraisal",
-          "direct_empirical_finding": "Empirical observation from the paper without boilerplate",
+          "domain_name": "Domain Title",
+          "score_awarded": "Score",
+          "direct_empirical_finding": "Direct observation from paper",
           "statistical_or_design_flaw": "Vulnerability identified"
         }}
-      ]
+      ],
+      "translational_verdict_and_advisory": "Final academic synthesis on whether clinicians should adopt, adapt, or reject these findings."
     }}
     """
 
@@ -1047,34 +1060,38 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     doc = SimpleDocTemplate(
         buf,
         pagesize=letter,
-        rightMargin=32,
-        leftMargin=32,
-        topMargin=26,
-        bottomMargin=26
+        rightMargin=36,
+        leftMargin=36,
+        topMargin=32,
+        bottomMargin=32
     )
     styles = getSampleStyleSheet()
 
     title_style = ParagraphStyle(
-        "T", parent=styles["Heading1"], fontSize=15, leading=18, textColor=colors.HexColor("#7A1C1C"), fontName="Helvetica-Bold", spaceAfter=2
+        "T", parent=styles["Heading1"], fontSize=16, leading=20, textColor=colors.HexColor("#7A1C1C"), fontName="Helvetica-Bold", spaceAfter=3
+    )
+    sub_title = ParagraphStyle(
+        "ST", parent=styles["Normal"], fontSize=8.5, leading=11, textColor=colors.HexColor("#555555"), fontName="Helvetica-Oblique", spaceAfter=8
     )
     sec_heading = ParagraphStyle(
-        "SH", parent=styles["Heading2"], fontSize=10, leading=13, textColor=colors.HexColor("#4A1515"), fontName="Helvetica-Bold", spaceBefore=7, spaceAfter=4
+        "SH", parent=styles["Heading2"], fontSize=10.5, leading=14, textColor=colors.HexColor("#4A1515"), fontName="Helvetica-Bold", spaceBefore=8, spaceAfter=4
     )
-    body_style = ParagraphStyle("B", parent=styles["Normal"], fontSize=8, leading=10.5, fontName="Helvetica")
+    body_style = ParagraphStyle("B", parent=styles["Normal"], fontSize=8, leading=11, fontName="Helvetica")
     bold_style = ParagraphStyle("BB", parent=body_style, fontName="Helvetica-Bold")
     header_style = ParagraphStyle("H", parent=body_style, fontName="Helvetica-Bold", textColor=colors.white)
 
     story = [
-        Paragraph(f"{APP_NAME} — Forensic Methodological Audit & Content Critique", title_style),
+        Paragraph(f"{APP_NAME} — Publication-Grade Forensic Critical Appraisal", title_style),
+        Paragraph("Rigorous Methodological Autopsy, Arithmetic Derivations & Bias Critique", sub_title),
         Spacer(1, 4),
     ]
 
     harvard_authors = format_harvard_authors(base_data.get("authors", "Not Specified"), max_authors=3)
     meta_data = [
-        [Paragraph(f"<b>Evaluated Manuscript:</b> {base_data.get('paper_title', 'N/A')}", body_style), Paragraph(f"<b>Authors:</b> {harvard_authors} ({base_data.get('year_published', 'N/A')})", body_style)],
-        [Paragraph(f"<b>Architecture:</b> {base_data.get('study_design', 'N/A')} | <b>Tool:</b> {base_data.get('appraisal_tool_selected', 'N/A')}", body_style), Paragraph(f"<b>Overall Score:</b> {base_data.get('overall_verdict', 'N/A')}", bold_style)],
+        [Paragraph(f"<b>Manuscript:</b> {base_data.get('paper_title', 'N/A')}", body_style), Paragraph(f"<b>Authors:</b> {harvard_authors} ({base_data.get('year_published', 'N/A')})", body_style)],
+        [Paragraph(f"<b>Architecture:</b> {base_data.get('study_design', 'N/A')} | <b>Tool:</b> {base_data.get('appraisal_tool_selected', 'N/A')}", body_style), Paragraph(f"<b>Auditor Verdict:</b> {base_data.get('overall_verdict', 'N/A')}", bold_style)],
     ]
-    t_meta = Table(meta_data, colWidths=[4.2 * inch, 3.4 * inch])
+    t_meta = Table(meta_data, colWidths=[4.1 * inch, 3.3 * inch])
     t_meta.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FDEDEC')),
         ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#C0392B')),
@@ -1083,47 +1100,73 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
     ]))
     story.append(t_meta)
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8))
 
-    story.append(Paragraph("<b>1. Detailed Mathematical & Scoring Arithmetic</b>", sec_heading))
+    # 1. Tool Selection & Comparative Rationale
+    story.append(Paragraph("<b>1. Methodological Tool Selection & Comparative Justification</b>", sec_heading))
+    rationale = deep_dive.get("tool_selection_rationale", {})
+    t_rat_data = [
+        [Paragraph("<b>Mandated Framework:</b>", bold_style), Paragraph(f"<b>{rationale.get('assigned_tool', 'Tool')}</b> ({rationale.get('architecture_classification', 'Design')})", body_style)],
+        [Paragraph("<b>Selection Rationale:</b>", bold_style), Paragraph(rationale.get("selection_justification", "N/A"), body_style)],
+        [Paragraph("<b>Rejected Competing Tools:</b>", bold_style), Paragraph(rationale.get("competing_tools_rejected", "N/A"), body_style)],
+    ]
+    t_rat = Table(t_rat_data, colWidths=[1.8 * inch, 5.6 * inch])
+    t_rat.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F5EEF8')),
+        ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#FBFCFC')),
+        ('BOX', (0, 0), (-1, -1), 0.75, colors.HexColor('#AF7AC5')),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D7BDE2')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(t_rat)
+    story.append(Spacer(1, 8))
+
+    # 2. Arithmetic Breakdown Table
+    story.append(Paragraph("<b>2. Step-by-Step Mathematical Derivations & Score Arithmetic</b>", sec_heading))
     arith = deep_dive.get("arithmetic_breakdown", {})
     arith_rows = [
         [Paragraph("<b>Mathematical Formula / Rule:</b>", bold_style), Paragraph(arith.get("formula_used", "N/A"), body_style)],
-        [Paragraph("<b>Step-by-Step Calculation:</b>", bold_style), Paragraph(arith.get("step_by_step_calculation", "N/A"), body_style)],
+        [Paragraph("<b>Step-by-Step Derivation:</b>", bold_style), Paragraph(arith.get("step_by_step_calculation", "N/A"), body_style)],
         [Paragraph("<b>Final Calculated Tally:</b>", bold_style), Paragraph(f"<b>{arith.get('final_tally', 'N/A')}</b>", bold_style)],
     ]
-    t_arith = Table(arith_rows, colWidths=[2.2 * inch, 5.4 * inch])
+    t_arith = Table(arith_rows, colWidths=[1.8 * inch, 5.6 * inch])
     t_arith.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FDFEFE')),
-        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#BDC3C7')),
-        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#EAEDED')),
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#EBF5FB')),
+        ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#FDFEFE')),
+        ('BOX', (0, 0), (-1, -1), 0.75, colors.HexColor('#5DADE2')),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#AED6F1')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
     ]))
     story.append(t_arith)
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8))
 
-    story.append(Paragraph("<b>2. Substantive Content Criticisms & Methodological Vulnerabilities</b>", sec_heading))
-    crit_rows = [[Paragraph("Identified Deficit", header_style), Paragraph("Manuscript Empirical Fact / Quote", header_style), Paragraph("Scientific & Epidemiological Impact", header_style)]]
+    # 3. Substantive Content Criticisms
+    story.append(Paragraph("<b>3. Substantive Content Criticisms & Flaw Analysis</b>", sec_heading))
+    crit_rows = [[Paragraph("Identified Deficit & Mechanism", header_style), Paragraph("Manuscript Empirical Data / Line Citations", header_style), Paragraph("Scientific & Epidemiological Threat", header_style)]]
     for c in deep_dive.get("substantive_criticisms", []):
         crit_rows.append([
             Paragraph(f"<b>{c.get('flaw_title')}</b>", bold_style),
             Paragraph(c.get("manuscript_evidence", ""), body_style),
             Paragraph(c.get("epidemiological_impact", ""), body_style),
         ])
-    t_crit = Table(crit_rows, colWidths=[2.2 * inch, 2.7 * inch, 2.7 * inch], repeatRows=1)
+    t_crit = Table(crit_rows, colWidths=[2.2 * inch, 2.6 * inch, 2.6 * inch], repeatRows=1)
     t_crit.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#A93226')),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#922B21')),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D5D8DC')),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
     ]))
     story.append(t_crit)
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8))
 
-    story.append(Paragraph("<b>3. Domain-Specific Audit (Boilerplate Free)</b>", sec_heading))
-    d_rows = [[Paragraph("Domain", header_style), Paragraph("Score", header_style), Paragraph("Direct Empirical Finding in Text", header_style), Paragraph("Identified Design / Statistical Vulnerability", header_style)]]
+    # 4. Domain Deep Dive (Boilerplate Stripped)
+    story.append(Paragraph("<b>4. Domain-by-Domain Forensic Audit (Boilerplate-Free)</b>", sec_heading))
+    d_rows = [[Paragraph("Domain Evaluated", header_style), Paragraph("Score", header_style), Paragraph("Direct Empirical Finding in Manuscript", header_style), Paragraph("Identified Design / Statistical Vulnerability", header_style)]]
     for d in deep_dive.get("domain_deep_dives", []):
         d_rows.append([
             Paragraph(f"<b>{d.get('domain_name')}</b>", bold_style),
@@ -1131,15 +1174,29 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
             Paragraph(d.get("direct_empirical_finding", ""), body_style),
             Paragraph(d.get("statistical_or_design_flaw", ""), body_style),
         ])
-    t_d = Table(d_rows, colWidths=[1.8 * inch, 0.9 * inch, 2.5 * inch, 2.4 * inch], repeatRows=1)
+    t_d = Table(d_rows, colWidths=[1.8 * inch, 0.9 * inch, 2.4 * inch, 2.3 * inch], repeatRows=1)
     t_d.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#5D6D7E')),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#34495E')),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D5D8DC')),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
     ]))
     story.append(t_d)
+    story.append(Spacer(1, 8))
+
+    # 5. Translational Advisory
+    adv = deep_dive.get("translational_verdict_and_advisory", "")
+    if adv:
+        story.append(Paragraph("<b>5. Translational Clinical Advisory & Adoption Verdict</b>", sec_heading))
+        t_adv = Table([[Paragraph(adv, body_style)]], colWidths=[7.4 * inch])
+        t_adv.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FEF9E7')),
+            ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#F1C40F')),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(t_adv)
 
     doc.build(story)
     buf.seek(0)
@@ -1149,38 +1206,49 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
 def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     doc = Document()
     title = doc.add_heading(level=0)
-    run_t = title.add_run(f"{APP_NAME} — Forensic Methodological Audit & Content Critique")
+    run_t = title.add_run(f"{APP_NAME} — Publication-Grade Forensic Critical Appraisal")
     run_t.font.size = Pt(18)
     run_t.font.bold = True
-    run_t.font.color.rgb = RGBColor(180, 40, 40)
+    run_t.font.color.rgb = RGBColor(146, 43, 33)
 
     harvard_authors = format_harvard_authors(base_data.get("authors", "Not Specified"), max_authors=3)
     p_meta = doc.add_paragraph()
     p_meta.add_run("Evaluated Manuscript: ").bold = True
     p_meta.add_run(f"{base_data.get('paper_title')} ({harvard_authors}, {base_data.get('year_published')})\n")
-    p_meta.add_run(f"Architecture: {base_data.get('study_design')} | Tool Applied: {base_data.get('appraisal_tool_selected')}\n")
+    p_meta.add_run(f"Architecture: {base_data.get('study_design')} | Gold-Standard Tool: {base_data.get('appraisal_tool_selected')}\n")
+    p_meta.add_run(f"Overall Adjudicated Verdict: {base_data.get('overall_verdict')}").bold = True
 
-    doc.add_heading("1. Mathematical Arithmetic & Score Tally", level=1)
+    # 1. Rationale
+    doc.add_heading("1. Methodological Tool Selection & Comparative Justification", level=1)
+    rat = deep_dive.get("tool_selection_rationale", {})
+    doc.add_paragraph(f"Mandated Tool: {rat.get('assigned_tool')} ({rat.get('architecture_classification')})")
+    doc.add_paragraph(f"Selection Justification:\n{rat.get('selection_justification')}")
+    doc.add_paragraph(f"Alternative Frameworks Rejected:\n{rat.get('competing_tools_rejected')}")
+
+    # 2. Arithmetic
+    doc.add_heading("2. Step-by-Step Mathematical Derivations & Score Arithmetic", level=1)
     arith = deep_dive.get("arithmetic_breakdown", {})
-    doc.add_paragraph(f"Formula / Rule: {arith.get('formula_used', 'N/A')}")
-    doc.add_paragraph(f"Step-by-Step Calculation:\n{arith.get('step_by_step_calculation', 'N/A')}")
+    doc.add_paragraph(f"Formula / Decision Gate: {arith.get('formula_used', 'N/A')}")
+    doc.add_paragraph(f"Step-by-Step Arithmetic Calculation:\n{arith.get('step_by_step_calculation', 'N/A')}")
     p_fin = doc.add_paragraph()
-    p_fin.add_run(f"Final Score / Tally: {arith.get('final_tally', 'N/A')}").bold = True
+    p_fin.add_run(f"Final Calculated Score / Tally: {arith.get('final_tally', 'N/A')}").bold = True
 
-    doc.add_heading("2. Substantive Content Criticisms", level=1)
+    # 3. Content Criticisms
+    doc.add_heading("3. Substantive Content Criticisms & Flaw Analysis", level=1)
     for idx, c in enumerate(deep_dive.get("substantive_criticisms", []), 1):
         p_c = doc.add_paragraph(style='List Bullet')
         p_c.add_run(f"{idx}. {c.get('flaw_title')}: ").bold = True
         p_c.add_run(f"{c.get('manuscript_evidence')}\n")
-        p_c.add_run(f"Epidemiological Impact: {c.get('epidemiological_impact')}")
+        p_c.add_run(f"Epidemiological Threat: {c.get('epidemiological_impact')}")
 
-    doc.add_heading("3. Domain Evaluation (Boilerplate Stripped)", level=1)
+    # 4. Domain Audit
+    doc.add_heading("4. Domain-by-Domain Forensic Audit (Boilerplate-Free)", level=1)
     table = doc.add_table(rows=1, cols=4)
     table.style = "Table Grid"
     headers = ["Domain", "Score", "Direct Manuscript Finding", "Methodological Vulnerability"]
     for i, h in enumerate(headers):
         cell = table.rows[0].cells[i]
-        shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="A93226"/>')
+        shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="922B21"/>')
         cell._tc.get_or_add_tcPr().append(shd)
         r = cell.paragraphs[0].add_run(h)
         r.bold = True
@@ -1192,6 +1260,12 @@ def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
         row[1].paragraphs[0].add_run(d.get("score_awarded", ""))
         row[2].paragraphs[0].add_run(d.get("direct_empirical_finding", ""))
         row[3].paragraphs[0].add_run(d.get("statistical_or_design_flaw", ""))
+
+    # 5. Advisory
+    adv = deep_dive.get("translational_verdict_and_advisory", "")
+    if adv:
+        doc.add_heading("5. Translational Clinical Advisory & Adoption Verdict", level=1)
+        doc.add_paragraph(adv)
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -1540,14 +1614,6 @@ st.markdown(
     .stButton>button:active, .stDownloadButton>button:active {
         background-color: #4A8574 !important;
     }
-    .deepdive-box {
-        background-color: #FDEDEC;
-        border: 1px solid #C0392B;
-        border-radius: 8px;
-        padding: 12px;
-        margin-top: 10px;
-        margin-bottom: 10px;
-    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -1849,21 +1915,21 @@ if "appraisal_data" in st.session_state:
             use_container_width=True,
         )
 
-    # --- FORENSIC DEEP-DIVE TRIGGER & DISPLAY ---
+    # --- ADVANCED PUBLICATION-GRADE FORENSIC DEEP-DIVE ---
     st.markdown("---")
-    st.subheader("🔬 Advanced Forensic Deep-Dive (Optional)")
-    st.caption("Generates explicit score arithmetic, strips all generic risk-of-bias definitions, and details 2–3 substantive content criticisms.")
+    st.subheader("🔬 Publication-Grade Forensic Deep-Dive")
+    st.caption("Generates a full peer-review autopsy: tool selection comparative rationale, explicit arithmetic derivations, zero generic boilerplate, and 2–3 substantive content critiques.")
 
     if st.button("Generate Forensic Deep-Dive Report", type="secondary"):
         if not api_key:
             st.error("Access key required.")
         else:
             client = genai.Client(api_key=api_key)
-            with st.spinner("Extracting explicit arithmetic and isolating content criticisms..."):
+            with st.spinner("Executing rigorous mathematical and methodological deep-dive..."):
                 try:
                     deep_dive_res = generate_forensic_deep_dive(client, data, st.session_state.get("raw_paper_text", ""))
                     st.session_state["deep_dive_data"] = deep_dive_res
-                    st.success("Forensic deep-dive generated successfully.")
+                    st.success("Publication-grade forensic deep-dive generated.")
                     st.rerun()
                 except Exception as err:
                     st.error(f"Error generating deep-dive: {err}")
@@ -1871,13 +1937,25 @@ if "appraisal_data" in st.session_state:
     if st.session_state.get("deep_dive_data"):
         dd = st.session_state["deep_dive_data"]
         with st.container():
-            st.markdown("#### 🧮 Mathematical & Arithmetic Tally")
+            st.markdown("#### ⚖️ Methodological Tool Selection Rationale")
+            rat = dd.get("tool_selection_rationale", {})
+            st.markdown(f"**Mandated Instrument:** `{rat.get('assigned_tool', 'N/A')}`")
+            st.write(rat.get("selection_justification", "N/A"))
+            with st.expander("Comparative Framework Analysis (Why other tools were rejected)"):
+                st.write(rat.get("competing_tools_rejected", "N/A"))
+
+            st.markdown("#### 🧮 Mathematical Arithmetic Derivation")
             arith = dd.get("arithmetic_breakdown", {})
-            st.info(f"**Formula:** {arith.get('formula_used', 'N/A')}\n\n**Step-by-Step:**\n{arith.get('step_by_step_calculation', 'N/A')}\n\n**Final Result:** {arith.get('final_tally', 'N/A')}")
+            st.info(f"**Mathematical Rule / Equation:** {arith.get('formula_used', 'N/A')}\n\n**Step-by-Step Calculation:**\n{arith.get('step_by_step_calculation', 'N/A')}\n\n**Final Result:** {arith.get('final_tally', 'N/A')}")
 
             st.markdown("#### ⚠️ Substantive Content Criticisms")
             for c in dd.get("substantive_criticisms", []):
-                st.error(f"**{c.get('flaw_title')}:** {c.get('manuscript_evidence')}\n\n*Impact:* {c.get('epidemiological_impact')}")
+                st.error(f"**{c.get('flaw_title')}:** {c.get('manuscript_evidence')}\n\n*Epidemiological Threat:* {c.get('epidemiological_impact')}")
+
+            adv = dd.get("translational_verdict_and_advisory", "")
+            if adv:
+                st.markdown("#### 🎯 Translational Clinical Advisory")
+                st.warning(adv)
 
             c_dd_doc, c_dd_pdf = st.columns(2)
             with c_dd_doc:
