@@ -9,11 +9,13 @@ from typing import Dict, List, Optional
 
 from bs4 import BeautifulSoup
 from docx import Document
+from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
-from docx.shared import Pt, RGBColor
+from docx.shared import Inches, Pt, RGBColor
 from google import genai
 from google.genai import types
+from pypdf import PdfReader
 import requests
 import streamlit as st
 
@@ -106,105 +108,268 @@ def delete_appraisal(appraisal_id: int):
 TOOL_TAXONOMY = {
     "Clinical Practice Guideline / Consensus Statement": {
         "tool": "AGREE II",
+        "full_name": "Appraisal of Guidelines for Research & Evaluation II",
+        "purpose": "Assesses the methodological rigour, stakeholder involvement, and clinical transparency of guidelines.",
         "domains": [
-            "Domain 1: Scope and Purpose",
-            "Domain 2: Stakeholder Involvement",
-            "Domain 3: Rigour of Development",
-            "Domain 4: Clarity of Presentation",
-            "Domain 5: Applicability",
-            "Domain 6: Editorial Independence",
+            {
+                "name": "Domain 1: Scope and Purpose",
+                "question": "Are the overall objective(s), health question(s) covered, and target population explicitly described?",
+            },
+            {
+                "name": "Domain 2: Stakeholder Involvement",
+                "question": "Does the development group include all relevant professional groups, have patient/target population views been sought, and are target users clearly defined?",
+            },
+            {
+                "name": "Domain 3: Rigour of Development",
+                "question": "Were systematic search methods used, criteria for selecting evidence transparent, strengths/limitations explicit, health benefits/risks considered, and is an external review/update protocol documented?",
+            },
+            {
+                "name": "Domain 4: Clarity of Presentation",
+                "question": "Are recommendations specific, unambiguous, identifiable, and presenting different management options clearly?",
+            },
+            {
+                "name": "Domain 5: Applicability",
+                "question": "Does the guideline describe facilitators/barriers to application, advice/tools on execution, resource implications, and monitoring criteria?",
+            },
+            {
+                "name": "Domain 6: Editorial Independence",
+                "question": "Did the funding body influence guideline content, and were competing interests of development group members recorded and addressed?",
+            },
         ],
-        "scale": "1 (Strongly Disagree / Absent) to 7 (Strongly Agree / Exemplary)",
+        "scale": "1 (Strongly Disagree / Absent) to 7 (Strongly Agree / Exemplary). Overall domain scores are calculated as standardized percentages: (Obtained Score - Minimum Possible Score) / (Maximum Possible Score - Minimum Possible Score) * 100%. >70% indicates high quality.",
     },
     "Randomized Controlled Trial (RCT)": {
         "tool": "Cochrane RoB 2",
+        "full_name": "Cochrane Risk of Bias Tool for Randomized Trials (Version 2)",
+        "purpose": "Evaluates internal validity and potential systematic errors in trial design, conduct, and reporting.",
         "domains": [
-            "Domain 1: Bias arising from the randomization process",
-            "Domain 2: Bias due to deviations from intended interventions",
-            "Domain 3: Bias due to missing outcome data",
-            "Domain 4: Bias in measurement of the outcome",
-            "Domain 5: Bias in selection of the reported result",
+            {
+                "name": "Domain 1: Bias arising from the randomization process",
+                "question": "Was the allocation sequence random, concealed until assignment, and were baseline differences balanced across groups?",
+            },
+            {
+                "name": "Domain 2: Bias due to deviations from intended interventions",
+                "question": "Were participants and caregivers aware of assignments, and did any non-protocol deviations occur that were unbalanced between groups?",
+            },
+            {
+                "name": "Domain 3: Bias due to missing outcome data",
+                "question": "Were data for this outcome available for nearly all participants randomized, and is there evidence that missingness depends on true values?",
+            },
+            {
+                "name": "Domain 4: Bias in measurement of the outcome",
+                "question": "Was the outcome assessor blinded, was the measurement method appropriate, and could assessment have been influenced by knowledge of intervention?",
+            },
+            {
+                "name": "Domain 5: Bias in selection of the reported result",
+                "question": "Was the study analyzed in accordance with a pre-specified plan/protocol registered before unblinded data became available?",
+            },
         ],
-        "scale": "Low Risk | Some Concerns | High Risk",
+        "scale": "Low Risk of Bias | Some Concerns | High Risk of Bias. The overall risk of bias judgment matches the highest risk assessed in any individual domain.",
     },
     "Non-Randomized Intervention / Quasi-Experimental": {
         "tool": "ROBINS-I",
+        "full_name": "Risk Of Bias In Non-randomized Studies - of Interventions",
+        "purpose": "Assesses risk of bias in comparative studies comparing intervention groups without true randomization.",
         "domains": [
-            "Domain 1: Confounding",
-            "Domain 2: Selection of participants",
-            "Domain 3: Classification of interventions",
-            "Domain 4: Deviations from intended interventions",
-            "Domain 5: Missing data",
-            "Domain 6: Measurement of outcomes",
-            "Domain 7: Selection of the reported result",
+            {
+                "name": "Domain 1: Bias due to Confounding",
+                "question": "Did the authors adequately control for baseline and time-varying confounding using appropriate design or adjustment?",
+            },
+            {
+                "name": "Domain 2: Bias in Selection of participants",
+                "question": "Was participant selection into the study related to both intervention and outcome?",
+            },
+            {
+                "name": "Domain 3: Classification of interventions",
+                "question": "Were intervention status and exposure definitions clearly and objectively defined without misclassification?",
+            },
+            {
+                "name": "Domain 4: Deviations from intended interventions",
+                "question": "Were there systematic deviations from intended interventions arising because of the experimental context?",
+            },
+            {
+                "name": "Domain 5: Missing data",
+                "question": "Were outcome data complete, or were missing data handled with robust sensitivity/imputation analyses?",
+            },
+            {
+                "name": "Domain 6: Measurement of outcomes",
+                "question": "Were outcome assessors blinded, and were outcome measures valid, reliable, and applied equally?",
+            },
+            {
+                "name": "Domain 7: Selection of the reported result",
+                "question": "Are reported results free from selective outcome or analysis reporting based on statistical significance?",
+            },
         ],
-        "scale": (
-            "Low Risk | Moderate Risk | Serious Risk | Critical Risk | No"
-            " Information"
-        ),
+        "scale": "Low Risk | Moderate Risk | Serious Risk | Critical Risk | No Information.",
     },
     "Systematic Review / Meta-Analysis": {
         "tool": "AMSTAR 2",
+        "full_name": "A MeaSurement Tool to Assess systematic Reviews (Version 2)",
+        "purpose": "Critically appraises systematic reviews that evaluate randomized or non-randomized studies of healthcare interventions.",
         "domains": [
-            "Domain 1: PICO & Protocol Pre-registration (Critical)",
-            "Domain 2: Comprehensive Literature Search Strategy (Critical)",
-            "Domain 3: Duplicate Study Selection & Extraction",
-            "Domain 4: Excluded Studies Justification (Critical)",
-            "Domain 5: Risk of Bias Assessment in Primary Studies (Critical)",
-            "Domain 6: Meta-Analytic Synthesis Appropriateness (Critical)",
-            "Domain 7: Publication Bias Assessment (Critical)",
-            "Domain 8: Conflict of Interest & Funding Reporting",
+            {
+                "name": "Domain 1: PICO & Protocol Pre-registration",
+                "question": "Did the review question and inclusion criteria include components of PICO, and was a protocol established and registered prior to conducting the review?",
+            },
+            {
+                "name": "Domain 2: Comprehensive Literature Search Strategy",
+                "question": "Did the authors search at least two databases, provide keywords/search strategies, search trial registries, and review reference lists?",
+            },
+            {
+                "name": "Domain 3: Duplicate Study Selection & Extraction",
+                "question": "Did at least two authors independently screen titles, abstracts, and full texts, and extract study data?",
+            },
+            {
+                "name": "Domain 4: Excluded Studies Justification",
+                "question": "Did the authors provide a comprehensive list of potentially relevant excluded studies along with explicit reasons for each exclusion?",
+            },
+            {
+                "name": "Domain 5: Primary Study RoB Assessment",
+                "question": "Did the authors apply a recognized, formal risk of bias tool to primary included studies?",
+            },
+            {
+                "name": "Domain 6: Meta-Analytic Synthesis Appropriateness",
+                "question": "If quantitative synthesis was performed, were statistical pooling methods justified and investigated for heterogeneity?",
+            },
+            {
+                "name": "Domain 7: Publication Bias Assessment",
+                "question": "Did the authors investigate publication bias (funnel plots, Egger's test) and discuss its likely clinical impact?",
+            },
+            {
+                "name": "Domain 8: Conflict of Interest & Funding Reporting",
+                "question": "Did the authors report their funding sources and any conflicts of interest, as well as the funding sources of primary studies?",
+            },
         ],
-        "scale": "Yes | Partial Yes | No",
+        "scale": "High Confidence (No or one non-critical weakness) | Moderate Confidence (More than one non-critical weakness) | Low Confidence (One critical flaw) | Critically Low Confidence (More than one critical flaw).",
     },
     "Observational Study (Cohort or Case-Control)": {
         "tool": "Newcastle-Ottawa Scale (NOS) / CASP",
+        "full_name": "Newcastle-Ottawa Quality Assessment Scale / CASP Cohort Tool",
+        "purpose": "Evaluates selection, comparability, and exposure/outcome assessment in observational epidemiology.",
         "domains": [
-            "Domain 1: Selection of Cohorts / Cases",
-            "Domain 2: Comparability of Groups (Control for Confounders)",
-            "Domain 3: Ascertainment of Exposure and Outcome",
+            {
+                "name": "Domain 1: Selection of Cohorts / Cases",
+                "question": "Are the study cohorts truly representative, cases clearly defined, and exposure ascertainment secured via objective records?",
+            },
+            {
+                "name": "Domain 2: Comparability of Groups",
+                "question": "Did the study design or statistical model adjust for the primary confounder and additional relevant covariates?",
+            },
+            {
+                "name": "Domain 3: Ascertainment of Exposure and Outcome",
+                "question": "Was outcome assessment blinded or independent, with follow-up long and complete enough for meaningful conclusions?",
+            },
         ],
-        "scale": "Adequate (Star awarded) | Inadequate | Unclear",
+        "scale": "Stars awarded (0 to 9 stars total): Good Quality (7-9 stars) | Fair Quality (4-6 stars) | Poor Quality (0-3 stars).",
     },
     "Diagnostic Accuracy Study": {
         "tool": "QUADAS-2",
+        "full_name": "Quality Assessment of Diagnostic Accuracy Studies 2",
+        "purpose": "Evaluates risk of bias and applicability concerns in primary diagnostic accuracy studies.",
         "domains": [
-            "Domain 1: Patient Selection (Risk & Applicability)",
-            "Domain 2: Index Test Execution & Interpretation",
-            "Domain 3: Reference Standard Validity",
-            "Domain 4: Flow and Timing of Assessments",
+            {
+                "name": "Domain 1: Patient Selection",
+                "question": "Was a consecutive or random sample of patients enrolled, and was inappropriate exclusion avoided?",
+            },
+            {
+                "name": "Domain 2: Index Test Execution & Interpretation",
+                "question": "Were index test results interpreted without knowledge of the reference standard, and with a pre-specified threshold?",
+            },
+            {
+                "name": "Domain 3: Reference Standard Validity",
+                "question": "Is the reference standard likely to correctly classify the target condition, and interpreted without knowledge of the index test?",
+            },
+            {
+                "name": "Domain 4: Flow and Timing",
+                "question": "Was there an appropriate interval between index test and reference standard, and did all patients receive the same reference test?",
+            },
         ],
-        "scale": "Low Risk | High Risk | Unclear",
+        "scale": "Low Risk | High Risk | Unclear Risk across bias and applicability domains.",
     },
     "Narrative Review": {
         "tool": "SANRA",
+        "full_name": "Scale for the Assessment of Narrative Review Articles",
+        "purpose": "Evaluates quality and presentation standard of non-systematic scientific reviews.",
         "domains": [
-            "Domain 1: Justification of article's importance",
-            "Domain 2: Statement of concrete aims",
-            "Domain 3: Description of the literature search",
-            "Domain 4: Referencing of primary literature",
-            "Domain 5: Scientific reasoning and balanced presentation",
-            "Domain 6: Presentation of relevant data",
+            {
+                "name": "Domain 1: Justification of article's importance",
+                "question": "Is the scientific or clinical importance of the review justified and contextualized?",
+            },
+            {
+                "name": "Domain 2: Statement of concrete aims",
+                "question": "Does the article formulate explicit, concrete questions or aims?",
+            },
+            {
+                "name": "Domain 3: Description of the literature search",
+                "question": "Is the literature search methodology transparently described (databases, search terms, restrictions)?",
+            },
+            {
+                "name": "Domain 4: Referencing of primary literature",
+                "question": "Are arguments and assertions referenced with original primary evidence rather than non-systematic reviews?",
+            },
+            {
+                "name": "Domain 5: Scientific reasoning and balanced presentation",
+                "question": "Does the review present evidence impartially and discuss contradictory findings?",
+            },
+            {
+                "name": "Domain 6: Presentation of relevant data",
+                "question": "Are relevant endpoint data, clinical trial outcomes, and effect sizes synthesized in clear tables or charts?",
+            },
         ],
-        "scale": "0 (Score 0) | 1 (Score 1) | 2 (Score 2 - Fully met)",
+        "scale": "0 to 2 per item (Maximum score 12). >=9/12 indicates a high-standard narrative review.",
     },
     "Qualitative Study": {
         "tool": "CASP Qualitative / COREQ",
+        "full_name": "Critical Appraisal Skills Programme (CASP) Qualitative Checklist",
+        "purpose": "Assesses credibility, dependability, and transferability of qualitative health inquiries.",
         "domains": [
-            "Domain 1: Research design appropriateness",
-            "Domain 2: Sampling and recruitment strategy",
-            "Domain 3: Data collection and reflexivity of the researcher",
-            "Domain 4: Ethical considerations addressed",
-            "Domain 5: Rigour and depth of data analysis",
-            "Domain 6: Clear statement of findings and value",
+            {
+                "name": "Domain 1: Research design appropriateness",
+                "question": "Is qualitative methodology appropriate for addressing the research goal?",
+            },
+            {
+                "name": "Domain 2: Sampling and recruitment strategy",
+                "question": "Was the recruitment strategy appropriate to the aims, and were non-participants explained?",
+            },
+            {
+                "name": "Domain 3: Data collection and reflexivity",
+                "question": "Did the researchers critically examine their own role, potential bias, and influence during data collection?",
+            },
+            {
+                "name": "Domain 4: Ethical considerations addressed",
+                "question": "Were ethical approval, consent procedures, and confidentiality explicitly secured?",
+            },
+            {
+                "name": "Domain 5: Rigour and depth of data analysis",
+                "question": "Was the analytic process rigorous (e.g., thematic analysis, saturation, duplicate coding)?",
+            },
+            {
+                "name": "Domain 6: Clear statement of findings and value",
+                "question": "Are findings clearly stated, substantiated by participant quotes, and clinically valuable?",
+            },
         ],
-        "scale": "Yes | Can't Tell | No",
+        "scale": "Yes | Can't Tell | No across 10 structured appraisal questions.",
     },
 }
 
 # ==========================================
-# 3. EXTRACTION & GEMINI ENGINE
+# 3. EXTRACTION ENGINE & GEMINI PIPELINE
 # ==========================================
+def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
+    """Extracts text page-by-page. Returns empty string if unreadable or scanned."""
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        extracted = []
+        for idx, page in enumerate(reader.pages):
+            text = page.extract_text() or ""
+            if text.strip():
+                extracted.append(f"--- [Page {idx + 1}] ---\n{text.strip()}")
+        full_text = "\n\n".join(extracted)
+        return full_text if len(full_text.strip()) > 150 else ""
+    except Exception:
+        return ""
+
+
 def extract_text_from_url(url: str) -> str:
     headers = {"User-Agent": "Mozilla/5.0"}
     if not url.startswith("http"):
@@ -216,13 +381,13 @@ def extract_text_from_url(url: str) -> str:
     for elem in soup(["script", "style", "nav", "footer", "header", "noscript"]):
         elem.decompose()
     article = soup.find("article") or soup.find("main") or soup.body
-    return article.get_text(separator="\n", strip=True)[:45000] if article else ""
+    return article.get_text(separator="\n", strip=True) if article else ""
 
 
 def appraise_with_gemini(
     client: genai.Client,
-    file_bytes: bytes = None,
-    text_content: str = None,
+    text_content: Optional[str] = None,
+    raw_pdf_bytes: Optional[bytes] = None,
 ) -> dict:
     taxonomy_json = json.dumps(TOOL_TAXONOMY, indent=2)
 
@@ -230,31 +395,44 @@ def appraise_with_gemini(
     You are an expert epidemiological reviewer and methodological appraiser.
     Evaluate the provided research paper or clinical guideline and perform a rigorous critical appraisal.
 
-    Appraisal Tool Taxonomy:
+    Appraisal Tool Taxonomy & Domain Questions:
     {taxonomy_json}
 
     Step-by-Step Instructions:
     1. Study Design Classification:
        - Classify the manuscript into ONE design from the taxonomy.
-       - If it is a formal clinical practice guideline, consensus statement, or clinical pathway with graded recommendations, classify it as "Clinical Practice Guideline / Consensus Statement" and apply AGREE II.
+       - If it is a formal clinical practice guideline or consensus statement with recommendations, apply AGREE II.
     2. Tool Assignment:
-       - Apply the corresponding Gold-Standard Tool and evaluate EVERY domain listed for that tool.
+       - Apply the corresponding Gold-Standard Tool. Evaluate EVERY domain and question listed for that tool.
     3. Grounded Evidence Extraction:
-       - Extract the exact 'verbatim_evidence' (direct quote).
-       - Provide the exact 'location_reference' (e.g., "Page 4, Methods §Randomization" or section name).
-       - Write a nuanced 'critique' justifying the score.
-    4. Provide an overall verdict and comprehensive synthesis.
+       - Include the 'evaluation_question' as provided in the taxonomy.
+       - Extract the exact 'verbatim_evidence' (direct quote from the text).
+       - Provide the exact 'location_reference' (e.g., "[Page 4] Methods §Randomization" or section name).
+       - Provide an analytical 'critique' justifying the score/rating.
+    4. Provide an overall verdict, synthesis, and categorize 'quality_tier' into exactly one of: "GREEN", "YELLOW", or "RED":
+       - "GREEN": Methodologically robust, low risk of bias, high clinical relevance and validity.
+       - "YELLOW": Moderate quality, some methodological concerns, fair clinical applicability.
+       - "RED": High risk of bias, critical flaws, weak validity, or poor applicability.
+    5. In 'tool_meta', return the tool acronym, full expanded name, explanation of the tool, and the formal scoring rules/percentages required.
 
     CRITICAL: Output ONLY a valid JSON object matching this schema:
     {{
       "paper_title": "Identified title",
       "study_design": "Identified design matching taxonomy",
       "appraisal_tool_selected": "Name of appraisal tool",
+      "quality_tier": "GREEN / YELLOW / RED",
       "overall_verdict": "Low Risk / Moderate Risk / High Risk / Recommended / etc.",
       "overall_synthesis": "Comprehensive narrative explaining methodological quality and clinical applicability.",
+      "tool_meta": {{
+        "acronym": "Tool Acronym",
+        "full_name": "Full Tool Name",
+        "purpose": "Clinical/methodological purpose of the tool",
+        "scoring_rules": "Detailed explanation of scores, thresholds, or stars required"
+      }},
       "domain_appraisals": [
         {{
           "domain_name": "Domain name as per taxonomy",
+          "evaluation_question": "The appraisal question evaluated",
           "rating": "Score or Rating",
           "location_reference": "Section or Page number reference",
           "verbatim_evidence": "Direct quote from text",
@@ -265,22 +443,24 @@ def appraise_with_gemini(
     """
 
     contents = []
-    if file_bytes:
+    if text_content and len(text_content.strip()) > 150:
         contents.append(
-            types.Part.from_bytes(data=file_bytes, mime_type="application/pdf")
+            f"PAPER CONTENT:\n{text_content}\n\nPerform the full critical appraisal and return the JSON object."
         )
-    elif text_content:
-        contents.append(text_content)
+    elif raw_pdf_bytes:
+        contents.append(
+            types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf")
+        )
+        contents.append(
+            "Perform the full critical appraisal using vision OCR on this paper and return the JSON object."
+        )
+    else:
+        raise ValueError("No valid manuscript text or PDF bytes supplied.")
 
-    contents.append(
-        "Perform the full critical appraisal on this paper and return the JSON object."
-    )
-
-    # Active supported models ordered by priority
     candidate_models = [
-        "gemini-3.8-flash",
-        "gemini-3.5-flash-lite",
+        "gemini-2.5-flash",
         "gemini-2.0-flash",
+        "gemini-3.8-flash",
     ]
 
     last_error = None
@@ -302,11 +482,9 @@ def appraise_with_gemini(
                 err_str = str(e)
                 last_error = e
 
-                # Handle high demand (503 / 429) with exponential backoff
                 if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str:
-                    time.sleep(3 * (attempt + 1))
+                    time.sleep(2 * (attempt + 1))
                     continue
-                # If model is not available for this key/region, break to next candidate
                 elif "404" in err_str or "NOT_FOUND" in err_str:
                     break
                 else:
@@ -326,6 +504,7 @@ def set_cell_background(cell, fill_hex: str):
 def build_docx_report(data: dict) -> io.BytesIO:
     doc = Document()
 
+    # Document Header
     title = doc.add_heading(level=0)
     run_t = title.add_run("Critical Appraisal & Methodological Quality Report")
     run_t.font.size = Pt(20)
@@ -336,6 +515,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
     p_sub.runs[0].font.size = Pt(9.5)
     p_sub.runs[0].italic = True
 
+    # Study Overview Metadata Table
     meta_table = doc.add_table(rows=4, cols=2)
     meta_table.style = "Table Grid"
     fields = [
@@ -359,18 +539,71 @@ def build_docx_report(data: dict) -> io.BytesIO:
             r1.font.color.rgb = RGBColor(170, 30, 30)
 
     doc.add_paragraph("")
-    doc.add_heading("1. Executive Methodological Synthesis", level=1)
-    p_syn = doc.add_paragraph(data.get("overall_synthesis", ""))
-    p_syn.paragraph_format.line_spacing = 1.15
 
-    doc.add_heading(f"2. Domain Appraisal ({data.get('appraisal_tool_selected')})", level=1)
+    # --- THREE-BAR VISUAL QUALITY GAUGE ---
+    tier = str(data.get("quality_tier", "")).upper()
+    if "GREEN" not in tier and "YELLOW" not in tier and "RED" not in tier:
+        # Determine fallback tier based on verdict text
+        v = str(data.get("overall_verdict", "")).lower()
+        if any(w in v for w in ["low", "high confidence", "recommended", "good"]):
+            tier = "GREEN"
+        elif any(w in v for w in ["some", "moderate", "fair"]):
+            tier = "YELLOW"
+        else:
+            tier = "RED"
+
+    p_gauge_label = doc.add_paragraph()
+    r_gl = p_gauge_label.add_run("Methodological Rigour & Clinical Trustworthiness Gauge (At-A-Glance):")
+    r_gl.bold = True
+    r_gl.font.size = Pt(10.5)
+
+    bar_table = doc.add_table(rows=1, cols=3)
+    bar_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+    cols_spec = [
+        ("RED", "C00000", "E6B8B8", "HIGH RISK / FLAWED\n(Limited Reliability)"),
+        ("YELLOW", "FFC000", "FFF2CC", "MODERATE / SOME CONCERNS\n(Conditional Validity)"),
+        ("GREEN", "385623", "E2EFDA", "ROBUST / LOW RISK\n(Strong Clinical Validity)"),
+    ]
+
+    for i, (b_tier, active_hex, inactive_hex, label) in enumerate(cols_spec):
+        cell = bar_table.rows[0].cells[i]
+        is_active = (b_tier == tier)
+        fill_hex = active_hex if is_active else inactive_hex
+        set_cell_background(cell, fill_hex)
+        p = cell.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run(label)
+        run.bold = is_active
+        run.font.size = Pt(8.5)
+        run.font.color.rgb = RGBColor(255, 255, 255) if is_active else RGBColor(80, 80, 80)
+        if is_active:
+            p_ind = cell.add_paragraph()
+            p_ind.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            r_ind = p_ind.add_run("▲ ASSIGNED QUALITY TIER ▲")
+            r_ind.bold = True
+            r_ind.font.size = Pt(8.5)
+            r_ind.font.color.rgb = RGBColor(255, 255, 255)
+
+    doc.add_paragraph("")
+
+    # Section 1: Detailed Question-by-Question Domain Appraisal
+    doc.add_heading(
+        f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})",
+        level=1,
+    )
+    p_lead = doc.add_paragraph(
+        "Each domain is evaluated below against its standard methodological criterion, presenting the appraisal prompt question, assigned score, grounded textual evidence, and evaluative critique."
+    )
+    p_lead.runs[0].font.size = Pt(9.5)
+
     table = doc.add_table(rows=1, cols=4)
     table.style = "Table Grid"
     headers = [
-        "Domain Evaluated",
+        "Domain & Appraisal Criterion Question",
         "Appraisal Score",
-        "Verbatim Evidence & Citation",
-        "Methodological Critique",
+        "Grounded Verbatim Evidence & Citation",
+        "Methodological Critique & Rationale",
     ]
     for i, title_text in enumerate(headers):
         cell = table.rows[0].cells[i]
@@ -383,9 +616,30 @@ def build_docx_report(data: dict) -> io.BytesIO:
 
     for item in data.get("domain_appraisals", []):
         row_cells = table.add_row().cells
-        row_cells[0].paragraphs[0].add_run(item.get("domain_name", "")).bold = True
-        row_cells[1].paragraphs[0].add_run(item.get("rating", "")).bold = True
 
+        # Col 0: Domain Name + Question Prompt for Context
+        p_d = row_cells[0].paragraphs[0]
+        r_name = p_d.add_run(f"{item.get('domain_name', '')}\n\n")
+        r_name.bold = True
+        r_name.font.size = Pt(9.5)
+
+        q_text = item.get("evaluation_question", "").strip()
+        if q_text:
+            r_ql = p_d.add_run("Appraisal Criterion Question:\n")
+            r_ql.bold = True
+            r_ql.font.size = Pt(8.5)
+            r_ql.font.color.rgb = RGBColor(80, 80, 80)
+            r_qt = p_d.add_run(f'"{q_text}"')
+            r_qt.italic = True
+            r_qt.font.size = Pt(8.5)
+
+        # Col 1: Score/Rating
+        p_r = row_cells[1].paragraphs[0]
+        r_sc = p_r.add_run(item.get("rating", ""))
+        r_sc.bold = True
+        r_sc.font.size = Pt(10)
+
+        # Col 2: Evidence & Section Location
         p_e = row_cells[2].paragraphs[0]
         loc = item.get("location_reference", "Section")
         r_loc = p_e.add_run(f"[{loc}]\n")
@@ -396,7 +650,102 @@ def build_docx_report(data: dict) -> io.BytesIO:
         r_q.italic = True
         r_q.font.size = Pt(8.5)
 
-        row_cells[3].paragraphs[0].add_run(item.get("critique", ""))
+        # Col 3: Detailed Critique
+        p_c = row_cells[3].paragraphs[0]
+        r_crit = p_c.add_run(item.get("critique", ""))
+        r_crit.font.size = Pt(9)
+
+    doc.add_paragraph("")
+
+    # Section 2: Summary of Findings and Final Scorecard
+    doc.add_heading("2. Summary of Findings & Final Scorecard", level=1)
+
+    # Narrative Summary
+    doc.add_heading("Overall Methodological Synthesis", level=2)
+    p_syn = doc.add_paragraph(data.get("overall_synthesis", ""))
+    p_syn.paragraph_format.line_spacing = 1.15
+    p_syn.runs[0].font.size = Pt(10)
+
+    # Final Scorecard Table
+    doc.add_heading("Final Scorecard Summary", level=2)
+    score_table = doc.add_table(rows=1, cols=3)
+    score_table.style = "Table Grid"
+
+    score_headers = ["Domain / Methodological Item", "Rating / Assigned Score", "Status"]
+    for i, title_text in enumerate(score_headers):
+        cell = score_table.rows[0].cells[i]
+        set_cell_background(cell, "333F48")
+        p = cell.paragraphs[0]
+        r = p.add_run(title_text)
+        r.bold = True
+        r.font.size = Pt(9)
+        r.font.color.rgb = RGBColor(255, 255, 255)
+
+    for item in data.get("domain_appraisals", []):
+        r_cells = score_table.add_row().cells
+        r_cells[0].paragraphs[0].add_run(item.get("domain_name", "")).font.size = Pt(9)
+        r_score = r_cells[1].paragraphs[0].add_run(item.get("rating", ""))
+        r_score.bold = True
+        r_score.font.size = Pt(9)
+
+        rating_str = str(item.get("rating", "")).lower()
+        if any(w in rating_str for w in ["low", "yes", "6", "7", "adequate", "2"]):
+            badge = "Satisfactory"
+        elif any(w in rating_str for w in ["some", "moderate", "partial", "4", "5", "1"]):
+            badge = "Minor / Moderate Concern"
+        else:
+            badge = "High Concern / Deficit"
+        r_cells[2].paragraphs[0].add_run(badge).font.size = Pt(8.5)
+
+    doc.add_paragraph("")
+    p_verdict = doc.add_paragraph()
+    r_vlabel = p_verdict.add_run("Final Quality Determination: ")
+    r_vlabel.bold = True
+    r_vlabel.font.size = Pt(11)
+    r_vval = p_verdict.add_run(data.get("overall_verdict", "N/A"))
+    r_vval.bold = True
+    r_vval.font.size = Pt(11)
+    r_vval.font.color.rgb = RGBColor(170, 30, 30)
+
+    doc.add_paragraph("")
+
+    # Section 3: Appraisal Standard Reference & Scoring Scale Appendix
+    doc.add_heading("3. Standard Reference, Tool Abbreviation & Scoring Scales", level=1)
+    
+    tool_meta = data.get("tool_meta", {})
+    acronym = tool_meta.get("acronym") or data.get("appraisal_tool_selected", "Tool")
+    full_name = tool_meta.get("full_name") or "Standard Critical Appraisal Instrument"
+    purpose = tool_meta.get("purpose") or "Standardized epidemiological instrument used to assess bias and study rigour."
+    scoring_rules = tool_meta.get("scoring_rules") or "Standard qualitative rating or numerical score threshold."
+
+    # Look up in taxonomy if tool_meta was incomplete
+    design_match = TOOL_TAXONOMY.get(data.get("study_design", ""))
+    if design_match:
+        if not full_name or full_name == "Standard Critical Appraisal Instrument":
+            full_name = design_match.get("full_name", full_name)
+        if not purpose or "Standardized epidemiological" in purpose:
+            purpose = design_match.get("purpose", purpose)
+        if not scoring_rules or "Standard qualitative" in scoring_rules:
+            scoring_rules = design_match.get("scale", scoring_rules)
+
+    app_table = doc.add_table(rows=4, cols=2)
+    app_table.style = "Table Grid"
+    app_entries = [
+        ("Tool & Abbreviation:", f"{acronym} — {full_name}"),
+        ("Instrument Purpose:", purpose),
+        ("Scoring Metric & Scales:", scoring_rules),
+        ("Interpretation Guide:", "Evidence appraised using this framework should be balanced against clinical relevance and the patient population. Low risk of bias or high score thresholds indicate strong internal validity, while high risk domains warrant caution before clinical translation."),
+    ]
+    for idx, (label, val) in enumerate(app_entries):
+        row = app_table.rows[idx]
+        set_cell_background(row.cells[0], "F2F5F8")
+        p0 = row.cells[0].paragraphs[0]
+        r0 = p0.add_run(label)
+        r0.bold = True
+        r0.font.size = Pt(9.5)
+        p1 = row.cells[1].paragraphs[0]
+        r1 = p1.add_run(val)
+        r1.font.size = Pt(9.5)
 
     doc.add_paragraph("")
     buf = io.BytesIO()
@@ -415,6 +764,9 @@ st.markdown(
     """
 <style>
     .stButton>button { width: 100%; border-radius: 8px; font-weight: 600; }
+    .gauge-container { display: flex; gap: 8px; margin-top: 10px; margin-bottom: 20px; }
+    .gauge-bar { flex: 1; padding: 12px; border-radius: 6px; text-align: center; font-weight: bold; font-size: 14px; }
+    .gauge-active { border: 2px solid #ffffff; box-shadow: 0 0 10px rgba(0,0,0,0.3); }
 </style>
 """,
     unsafe_allow_html=True,
@@ -439,7 +791,7 @@ if not st.session_state["authenticated"]:
 
 # --- Main App (Post Authentication) ---
 st.title("📑 AppraiseAI: Research Paper & Guideline Grader")
-st.caption("Powered by Gemini | Automated Tool Selection & Word Export")
+st.caption("Powered by Gemini Fast Text Engine with Vision OCR Fallback")
 
 api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None))
 
@@ -453,17 +805,6 @@ with st.sidebar:
         )
     else:
         st.success("API Key Active")
-
-    # Diagnostic model inspector
-    if api_key and st.button("🔍 Check Accessible Models"):
-        try:
-            diag_client = genai.Client(api_key=api_key)
-            models_pager = diag_client.models.list()
-            active_ids = [m.name for m in models_pager if "generateContent" in getattr(m, "supported_actions", []) or "generateContent" in getattr(m, "supported_generation_methods", [])]
-            st.write("**Supported Models for your Key:**")
-            st.json(active_ids[:8] if active_ids else [m.name for m in models_pager][:8])
-        except Exception as e:
-            st.error(f"Could not fetch models: {e}")
 
     if st.button("Log Out"):
         st.session_state["authenticated"] = False
@@ -499,8 +840,8 @@ with st.sidebar:
 
 tab_pdf, tab_url = st.tabs(["📤 Upload PDF (Mobile / Desktop)", "🔗 Enter Link or DOI"])
 
-pdf_bytes = None
-url_text = None
+paper_text = ""
+raw_pdf_bytes = None
 filename_tag = "Paper"
 
 with tab_pdf:
@@ -508,9 +849,19 @@ with tab_pdf:
         "Upload Manuscript or Clinical Practice Guideline", type=["pdf"]
     )
     if uploaded:
-        pdf_bytes = uploaded.read()
+        raw_pdf_bytes = uploaded.read()
         filename_tag = uploaded.name
-        st.success(f"Loaded `{uploaded.name}` ({len(pdf_bytes) // 1024} KB)")
+        with st.spinner("Parsing text locally from PDF pages..."):
+            paper_text = extract_text_from_pdf_bytes(raw_pdf_bytes)
+
+        if paper_text:
+            st.success(
+                f"⚡ Parsed text successfully ({len(paper_text):,} characters extracted via python)"
+            )
+        else:
+            st.warning(
+                "⚠️ PDF appears scanned or image-based. Gemini Native Vision OCR will be used automatically."
+            )
 
 with tab_url:
     url_input = st.text_input(
@@ -519,27 +870,38 @@ with tab_url:
     )
     if st.button("Fetch Article Content"):
         if url_input.strip():
-            with st.spinner("Retrieving article..."):
+            with st.spinner("Retrieving article text..."):
                 try:
-                    url_text = extract_text_from_url(url_input.strip())
+                    paper_text = extract_text_from_url(url_input.strip())
                     filename_tag = "Web_Article"
-                    st.success("Article successfully retrieved.")
+                    st.success(f"Retrieved {len(paper_text):,} characters from link.")
                 except Exception as e:
                     st.error(f"Failed to fetch content: {str(e)}")
 
 if st.button("⚡ Run Methodological Appraisal", type="primary"):
     if not api_key:
         st.warning("Please enter your Gemini API key in the sidebar.")
-    elif not pdf_bytes and not url_text:
+    elif not paper_text and not raw_pdf_bytes:
         st.warning("Please upload a PDF or fetch an article URL first.")
     else:
         client = genai.Client(api_key=api_key)
-        with st.spinner("Gemini is classifying design, matching the tool, and evaluating domains..."):
+        mode_label = (
+            "Vision OCR"
+            if (raw_pdf_bytes and not paper_text)
+            else "Extracted Text"
+        )
+        with st.spinner(f"Evaluating domains and criteria using {mode_label}..."):
             try:
-                data = appraise_with_gemini(client, file_bytes=pdf_bytes, text_content=url_text)
+                data = appraise_with_gemini(
+                    client,
+                    text_content=paper_text,
+                    raw_pdf_bytes=raw_pdf_bytes if not paper_text else None,
+                )
                 new_id = save_appraisal(data, filename_tag)
                 st.session_state["appraisal_data"] = data
-                st.success(f"Appraisal finished and saved to library (ID: #{new_id})!")
+                st.success(
+                    f"Appraisal finished and saved to library (ID: #{new_id})!"
+                )
                 st.rerun()
             except Exception as e:
                 st.error(f"Appraisal failed: {str(e)}")
@@ -558,12 +920,35 @@ if "appraisal_data" in st.session_state:
     with c3:
         st.metric("Overall Verdict", data.get("overall_verdict"))
 
-    st.info(f"**Synthesis:** {data.get('overall_synthesis')}")
+    # Three-Bar Quality Gauge in Streamlit
+    tier = str(data.get("quality_tier", "")).upper()
+    if "GREEN" not in tier and "YELLOW" not in tier and "RED" not in tier:
+        v = str(data.get("overall_verdict", "")).lower()
+        tier = "GREEN" if any(w in v for w in ["low", "high", "recommended"]) else ("YELLOW" if any(w in v for w in ["some", "moderate"]) else "RED")
 
-    st.subheader("📊 Domain Breakdown")
+    st.markdown("#### 🎯 At-A-Glance Quality Meter")
+    g_col1, g_col2, g_col3 = st.columns(3)
+    with g_col1:
+        if tier == "RED":
+            st.error("🚨 **RED TIER**\nHigh Risk / Methodological Flaws")
+        else:
+            st.caption("Red (High Risk)")
+    with g_col2:
+        if tier == "YELLOW":
+            st.warning("⚠️ **YELLOW TIER**\nModerate Quality / Some Concerns")
+        else:
+            st.caption("Yellow (Moderate)")
+    with g_col3:
+        if tier == "GREEN":
+            st.success("✅ **GREEN TIER**\nRobust / Low Risk / Trustworthy")
+        else:
+            st.caption("Green (Robust)")
+
+    st.subheader("📊 Domain Breakdown with Questions")
     rows = [
         {
             "Domain": d.get("domain_name"),
+            "Question / Criterion": d.get("evaluation_question"),
             "Score/Rating": d.get("rating"),
             "Reference": d.get("location_reference"),
             "Verbatim Evidence": d.get("verbatim_evidence"),
@@ -573,12 +958,29 @@ if "appraisal_data" in st.session_state:
     ]
     st.dataframe(rows, use_container_width=True)
 
+    st.subheader("📝 Executive Summary & Findings")
+    st.info(data.get("overall_synthesis"))
+
+    # Tool Metadata details
+    tool_meta = data.get("tool_meta", {})
+    if tool_meta:
+        with st.expander("📖 Appraisal Framework & Scoring Standards"):
+            st.markdown(f"**Tool:** {tool_meta.get('acronym')} ({tool_meta.get('full_name')})")
+            st.markdown(f"**Purpose:** {tool_meta.get('purpose')}")
+            st.markdown(f"**Scoring Metric:** {tool_meta.get('scoring_rules')}")
+
     doc_buf = build_docx_report(data)
-    safe_title = re.sub(r"[^a-zA-Z0-9_-]", "_", data.get("paper_title", "Report")[:25])
+    safe_title = re.sub(
+        r"[^a-zA-Z0-9_-]", "_", data.get("paper_title", "Report")[:25]
+    )
     st.download_button(
         label="📥 Download Completed Word Document (.docx)",
         data=doc_buf,
-        file_name=f"Appraisal_{data.get('appraisal_tool_selected')}_{safe_title}.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        file_name=(
+            f"Appraisal_{data.get('appraisal_tool_selected')}_{safe_title}.docx"
+        ),
+        mime=(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ),
         use_container_width=True,
     )
