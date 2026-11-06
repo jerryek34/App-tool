@@ -67,7 +67,13 @@ SEED_TAXONOMY = {
             {"name": "Domain 7: Publication Bias Assessment", "question": "Did authors formally test for publication bias (funnel plots, Egger's test)?"},
             {"name": "Domain 8: Conflict of Interest & Funding", "question": "Did authors report their own funding/COIs and funding of primary included studies?"},
         ],
-        "scale": "High Confidence | Moderate Confidence | Low Confidence | Critically Low Confidence.",
+        "scale": "High Confidence | Moderate Confidence | Low Confidence | Critically Low Confidence. Based on weaknesses in 7 critical domains.",
+        "scoring_guide": (
+            "• High Confidence: No or one non-critical weakness; provides an accurate, comprehensive synthesis of available studies.\n"
+            "• Moderate Confidence: More than one non-critical weakness, but no critical flaws; summary remains accurate.\n"
+            "• Low Confidence: One critical flaw (with or without non-critical weaknesses); the review may not provide an accurate summary.\n"
+            "• Critically Low Confidence: More than one critical flaw; the review should not be relied on for clinical decision-making."
+        )
     },
     "Narrative Review": {
         "tool": "SANRA",
@@ -82,6 +88,13 @@ SEED_TAXONOMY = {
             {"name": "Domain 6: Presentation of relevant data", "question": "Are numerical endpoint values, trial sample sizes, and comparative effect estimates tabulated?"},
         ],
         "scale": "0 = Not Met | 1 = Partially Met | 2 = Met. Total score out of 12 (>=9 required for high quality).",
+        "scoring_guide": (
+            "• 6 domains scored 0 (absent/not met), 1 (partially met), or 2 (completely met).\n"
+            "• Maximum total score: 12 points.\n"
+            "• High Quality: 9 to 12 points (robust reasoning, well-referenced, and balanced).\n"
+            "• Moderate Quality: 6 to 8 points (some omissions in search methods or balance).\n"
+            "• Low Quality: 0 to 5 points (insufficient literature reporting or high risk of advocacy bias)."
+        )
     },
     "Clinical Practice Guideline / Consensus Statement": {
         "tool": "AGREE II",
@@ -96,6 +109,12 @@ SEED_TAXONOMY = {
             {"name": "Domain 6: Editorial Independence", "question": "Did funding bodies influence content, and were competing interests addressed?"},
         ],
         "scale": "1 (Strongly Disagree / Absent) to 7 (Strongly Agree / Exemplary). Standardized % >= 70% required for high quality.",
+        "scoring_guide": (
+            "• Scored 1 to 7 per item. Scaled domain scores calculated as: (Obtained - Minimum possible) / (Maximum possible - Minimum possible) × 100%.\n"
+            "• Strongly Recommended: Domain 3 (Rigour) >= 70% and most other domains >= 70%.\n"
+            "• Recommended with Modifications: Most domains score between 50% and 69%.\n"
+            "• Not Recommended: Domain 3 < 50%, reflecting substandard development methods."
+        )
     },
     "Randomized Controlled Trial (RCT)": {
         "tool": "Cochrane RoB 2",
@@ -109,6 +128,11 @@ SEED_TAXONOMY = {
             {"name": "Domain 5: Selection of the reported result", "question": "Was the trial registered prospectively with an analysis plan finalized prior to unblinded analysis?"},
         ],
         "scale": "Low Risk | Some Concerns | High Risk. A single High Risk domain mandates an overall High Risk rating.",
+        "scoring_guide": (
+            "• Low Risk of Bias: Study is judged to be at low risk across all 5 key domains.\n"
+            "• Some Concerns: Study has some concerns in at least one domain, but no domain is at high risk.\n"
+            "• High Risk of Bias: High risk of bias in at least one domain, or 'some concerns' across multiple domains that substantially lower confidence."
+        )
     },
     "Non-Randomized Intervention / Quasi-Experimental": {
         "tool": "ROBINS-I",
@@ -124,6 +148,12 @@ SEED_TAXONOMY = {
             {"name": "Domain 7: Selection of reported result", "question": "Are published results consistent with pre-registered protocol without selective p-hacking?"},
         ],
         "scale": "Low Risk | Moderate Risk | Serious Risk | Critical Risk | No Information.",
+        "scoring_guide": (
+            "• Low Risk: Comparable to a well-performed randomized trial.\n"
+            "• Moderate Risk: Sound for a non-randomized study; some residual confounding possible.\n"
+            "• Serious Risk: Presence of important confounding or measurement flaws; interpret cautiously.\n"
+            "• Critical Risk: Flaws are so severe that the study provides no useful evidence."
+        )
     },
     "Observational Study (Cohort)": {
         "tool": "Newcastle-Ottawa Scale (NOS) Cohort",
@@ -135,6 +165,12 @@ SEED_TAXONOMY = {
             {"name": "Outcome: Assessment & Follow-up", "question": "Was outcome assessed independently/blinded, follow-up long enough, and adequacy of cohort follow-up complete (>80%)? (0-3 Stars)"},
         ],
         "scale": "Stars Awarded (0-9 Total): Good Quality (7-9 Stars) | Fair Quality (4-6 Stars) | Poor Quality (0-3 Stars).",
+        "scoring_guide": (
+            "• Selection (Max 4 ★): Evaluates exposed representativeness, non-exposed selection, exposure verification, and absence of outcome at baseline.\n"
+            "• Comparability (Max 2 ★): 1 ★ for controlling primary confounder (e.g., age/sex), 1 ★ for controlling secondary critical confounders.\n"
+            "• Outcome (Max 3 ★): 1 ★ for blinded/record outcome assessment, 1 ★ for sufficient duration, 1 ★ for follow-up rate > 80%.\n"
+            "• Thresholds: 7-9 Stars = Good Quality; 4-6 Stars = Fair Quality; 0-3 Stars = Poor Quality."
+        )
     },
     "Observational Study (Case-Control)": {
         "tool": "Newcastle-Ottawa Scale (NOS) Case-Control",
@@ -146,6 +182,12 @@ SEED_TAXONOMY = {
             {"name": "Exposure: Ascertainment & Non-Response", "question": "Was exposure ascertained via blinded interview/structured records and same non-response rate for both groups? (0-3 Stars)"},
         ],
         "scale": "Stars Awarded (0-9 Total): Good Quality (7-9 Stars) | Fair Quality (4-6 Stars) | Poor Quality (0-3 Stars).",
+        "scoring_guide": (
+            "• Selection (Max 4 ★): Case validation, representativeness, control selection, and definition of controls without prior outcome.\n"
+            "• Comparability (Max 2 ★): Matching or statistical adjustment for primary and additional covariates.\n"
+            "• Exposure (Max 3 ★): Secure ascertainment, same interview method, and identical non-response rates.\n"
+            "• Thresholds: 7-9 Stars = Good Quality; 4-6 Stars = Fair Quality; 0-3 Stars = Poor Quality."
+        )
     },
     "Cross-Sectional Study": {
         "tool": "AXIS",
@@ -159,6 +201,12 @@ SEED_TAXONOMY = {
             {"name": "Domain 5: Ethical Standards & Internal Consistency", "question": "Was ethical approval documented, and are discussions/conclusions justified by the results presented?"},
         ],
         "scale": "Yes | No | Don't Know across 20 structured criteria. High Quality (>=15 Yes) | Moderate Quality (10-14 Yes) | Low Quality (<10 Yes).",
+        "scoring_guide": (
+            "• Evaluates 20 specific cross-sectional quality questions.\n"
+            "• High Quality (>=15 Yes): Low risk of selection and reporting bias.\n"
+            "• Moderate Quality (10-14 Yes): Acceptable reporting, but non-response or confounding concerns exist.\n"
+            "• Low Quality (<10 Yes): High vulnerability to sampling bias or unverified survey instruments."
+        )
     },
     "Prediction Model Study": {
         "tool": "PROBAST",
@@ -171,6 +219,10 @@ SEED_TAXONOMY = {
             {"name": "Domain 4: Analysis", "question": "Were participant-to-variable ratio adequate, continuous predictors not inappropriately dichotomized, missing data handled, and model performance properly evaluated?"},
         ],
         "scale": "Low Risk | High Risk | Unclear Risk. If at least one domain is High Risk, overall model risk of bias is High Risk.",
+        "scoring_guide": (
+            "• Low Risk of Bias: All 4 domains (Participants, Predictors, Outcome, Analysis) judged low risk.\n"
+            "• High Risk of Bias: At least one domain evaluated as high risk, indicating substantial risk of optimistic model performance or overfitting."
+        )
     },
     "Diagnostic Accuracy Study": {
         "tool": "QUADAS-2",
@@ -183,6 +235,11 @@ SEED_TAXONOMY = {
             {"name": "Domain 4: Flow and Timing", "question": "Was time interval appropriate, and did all patients receive verified reference standard?"},
         ],
         "scale": "Low Risk | High Risk | Unclear Risk.",
+        "scoring_guide": (
+            "• Low Risk of Bias: All 4 domains are judged low risk; high diagnostic validity.\n"
+            "• High Risk of Bias: One or more domains show unblinded interpretation, verification bias, or spectrum bias.\n"
+            "• Unclear Risk: Insufficient reporting to verify test sequence or blinding."
+        )
     },
     "Qualitative Study": {
         "tool": "CASP Qualitative / COREQ",
@@ -197,6 +254,11 @@ SEED_TAXONOMY = {
             {"name": "Domain 6: Clear statement of findings and value", "question": "Are emergent themes backed by direct participant quotes with contextualized clinical value?"},
         ],
         "scale": "Yes | Can't Tell | No.",
+        "scoring_guide": (
+            "• Assesses 10 key qualitative validity items (Yes, Can't Tell, No).\n"
+            "• High Quality: Research reflexivity, thematic saturation, and participant quotes are fully articulated.\n"
+            "• Moderate/Low Quality: Failure to address researcher bias or unclear qualitative analysis methodology."
+        )
     },
 }
 
@@ -374,16 +436,9 @@ def format_harvard_authors(raw_authors: str, max_authors: int = 3) -> str:
         tokens = [t.strip(" .") for t in seg.split() if re.search(r"[a-zA-Z]", t)]
         if not tokens:
             continue
-        if len(tokens) == 1:
-            parsed_authors.append(tokens[0].title())
-        elif len(tokens[0]) <= 2 and len(tokens) > 1 and len(tokens[-1]) > 2:
-            surname = tokens[-1].title()
-            initials = "".join([f"{t[0].upper()}." for t in tokens[:-1]])
-            parsed_authors.append(f"{surname}, {initials}")
-        else:
-            surname = tokens[-1].title()
-            initials = "".join([f"{t[0].upper()}." for t in tokens[:-1]])
-            parsed_authors.append(f"{surname}, {initials}")
+        surname = tokens[-1].title()
+        initials = "".join([f"{t[0].upper()}." for t in tokens[:-1]])
+        parsed_authors.append(f"{surname}, {initials}" if initials else surname)
 
     if not parsed_authors:
         return str(raw_authors).strip()
@@ -835,7 +890,8 @@ def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str
         "full_name": "Full Tool Name",
         "purpose": "Precise methodological purpose",
         "domains": [{"name": "Domain Title", "question": "Criterion question"}],
-        "scale": "Scoring thresholds and rules"
+        "scale": "Scoring thresholds and rules",
+        "scoring_guide": "Step-by-step plain-English explanation of how scores are awarded and what thresholds indicate high vs poor quality."
       }
     }
     """
@@ -888,8 +944,13 @@ def execute_manuscript_evaluation(
     AUTHORS CITATION FORMAT:
     Extract up to 3 primary authors in Harvard format (e.g. 'Smith, J., Doe, A. and Brown, C.' or 'Smith, J. et al.' if >3).
 
+    DOMAIN EVALUATION RULE:
+    For EVERY domain in `domain_appraisals`:
+    - `evaluation_question`: State the EXACT, specific question in plain, simple English (e.g., 'Were the patients and outcome assessors kept unaware of who got the treatment to prevent bias?').
+    - `critique`: Explain clearly what happened in the paper, what was missing or done well, and why that specific score was given.
+
     METHODOLOGICAL SYNTHESIS FORMATTING RULE:
-    The overall synthesis must NOT be a wall of academic jargon. Provide it as 4 to 6 clear, easy-to-read bullet points written in simple, accessible language:
+    Provide 4 to 6 clear, easy-to-read bullet points written in simple, accessible language:
     - Point 1 (Study Setup): Plain-language summary of what the authors did and who was tested.
     - Point 2 (Key Strengths): What was done well and why the results are trustworthy.
     - Point 3 (Key Methodological Vulnerabilities): Major risks of bias, missing details, confounding, or unblinded assessment explained simply.
@@ -951,9 +1012,22 @@ def execute_manuscript_evaluation(
         ],
         "verdict_derivation": "Direct justification for final scores"
       }},
-      "tool_meta": {{"acronym": "Tool", "full_name": "Full Name", "purpose": "Purpose", "scoring_rules": "Rules"}},
+      "tool_meta": {{
+        "acronym": "Tool",
+        "full_name": "Full Name",
+        "purpose": "Purpose",
+        "scoring_rules": "Rules",
+        "scoring_guide": "Clear step-by-step breakdown of how the points or quality categories work"
+      }},
       "domain_appraisals": [
-        {{"domain_name": "Title", "evaluation_question": "Question", "rating": "Rating", "location_reference": "Section/Page", "verbatim_evidence": "Quote", "critique": "Critique"}}
+        {{
+          "domain_name": "Title",
+          "evaluation_question": "Plain-English question being investigated",
+          "rating": "Rating",
+          "location_reference": "Section/Page",
+          "verbatim_evidence": "Quote",
+          "critique": "Clear explanation of how the paper scored on this question"
+        }}
       ]
     }}
     """
@@ -1104,7 +1178,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
     doc.add_heading(f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})", level=1)
     table = doc.add_table(rows=1, cols=4)
     table.style = "Table Grid"
-    for i, h in enumerate(["Domain & Criterion", "Score", "Evidence", "Critique"]):
+    for i, h in enumerate(["Domain & Question", "Score", "Evidence", "Critique"]):
         cell = table.rows[0].cells[i]
         shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="78BBA6"/>')
         cell._tc.get_or_add_tcPr().append(shd)
@@ -1114,7 +1188,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
 
     for item in data.get("domain_appraisals", []):
         row_cells = table.add_row().cells
-        row_cells[0].paragraphs[0].add_run(f"{item.get('domain_name')}\n\n\"{item.get('evaluation_question')}\"")
+        row_cells[0].paragraphs[0].add_run(f"{item.get('domain_name')}\n\nQuestion: \"{item.get('evaluation_question')}\"")
         row_cells[1].paragraphs[0].add_run(str(item.get("rating")))
         row_cells[2].paragraphs[0].add_run(f"[{item.get('location_reference')}]\n\"{item.get('verbatim_evidence')}\"")
         row_cells[3].paragraphs[0].add_run(str(item.get("critique")))
@@ -1147,8 +1221,8 @@ def build_pdf_report(data: dict) -> io.BytesIO:
         pagesize=letter,
         rightMargin=32,
         leftMargin=32,
-        topMargin=28,
-        bottomMargin=28
+        topMargin=26,
+        bottomMargin=26
     )
     styles = getSampleStyleSheet()
 
@@ -1168,7 +1242,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
         leading=13,
         textColor=colors.HexColor("#1D3B32"),
         fontName="Helvetica-Bold",
-        spaceBefore=6,
+        spaceBefore=7,
         spaceAfter=4,
     )
     body_style = ParagraphStyle(
@@ -1180,12 +1254,20 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     )
     bold_style = ParagraphStyle("BB", parent=body_style, fontName="Helvetica-Bold")
     header_style = ParagraphStyle("H", parent=body_style, fontName="Helvetica-Bold", textColor=colors.white)
+    question_style = ParagraphStyle(
+        "QS",
+        parent=body_style,
+        fontSize=7.5,
+        leading=9.5,
+        textColor=colors.HexColor("#1E3F35"),
+        fontName="Helvetica-Oblique",
+    )
     quote_style = ParagraphStyle(
         "Q",
         parent=body_style,
         fontSize=7.5,
         leading=9.5,
-        textColor=colors.HexColor("#4A4A4A"),
+        textColor=colors.HexColor("#555555"),
         fontName="Helvetica-Oblique",
     )
 
@@ -1290,19 +1372,26 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_split)
     story.append(Spacer(1, 8))
 
-    # 4. Streamlined Domain Appraisal Table
-    story.append(Paragraph(f"<b>Domain-by-Domain Evaluation ({data.get('appraisal_tool_selected', 'Tool')})</b>", sec_heading))
+    # 4. Domain-by-Domain Evaluation Table (With explicit question clearly separated)
+    story.append(Paragraph(f"<b>Domain-by-Domain Evaluation & Core Questions ({data.get('appraisal_tool_selected', 'Tool')})</b>", sec_heading))
     domain_data = [[
-        Paragraph("Domain", header_style),
-        Paragraph("Rating", header_style),
-        Paragraph("Assessment & Grounded Evidence", header_style)
+        Paragraph("Domain & Specific Question Investigated", header_style),
+        Paragraph("Score / Grade", header_style),
+        Paragraph("Plain-English Assessment & Grounded Evidence", header_style)
     ]]
 
     for d in data.get("domain_appraisals", []):
         r_str = str(d.get("rating", ""))
+        question = d.get("evaluation_question", "")
         quote = d.get("verbatim_evidence", "")
         loc = d.get("location_reference", "")
         critique = d.get("critique", "")
+
+        domain_cell = [
+            Paragraph(f"<b>{d.get('domain_name')}</b>", bold_style),
+            Spacer(1, 2),
+            Paragraph(f"<b>Question:</b> \"{question}\"", question_style)
+        ]
 
         evidence_cell = [Paragraph(critique, body_style)]
         if quote and quote.lower() not in ["none", "not reported", "n/a"]:
@@ -1310,34 +1399,73 @@ def build_pdf_report(data: dict) -> io.BytesIO:
             evidence_cell.append(Paragraph(f"[{loc}] \"{quote}\"", quote_style))
 
         domain_data.append([
-            Paragraph(f"<b>{d.get('domain_name')}</b>", body_style),
+            domain_cell,
             Paragraph(f"<b>{r_str}</b>", bold_style),
             evidence_cell
         ])
 
-    t_domains = Table(domain_data, colWidths=[2.2 * inch, 1.0 * inch, 4.4 * inch], repeatRows=1)
+    t_domains = Table(domain_data, colWidths=[2.5 * inch, 1.0 * inch, 4.1 * inch], repeatRows=1)
     t_style = [
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#78BBA6')),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D0D0D0')),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
     ]
     for i in range(1, len(domain_data)):
         if i % 2 == 0:
             t_style.append(('BACKGROUND', (0, i), (-1, i), colors.HexColor('#F9FCFB')))
     t_domains.setStyle(TableStyle(t_style))
     story.append(t_domains)
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8))
 
-    # 5. Brief Footer Note
+    # 5. Dedicated Scoring System & Grading Guide Appendix
     tool_meta = data.get("tool_meta", {})
     acronym = tool_meta.get("acronym") or data.get("appraisal_tool_selected", "Tool")
     full_name = tool_meta.get("full_name") or "Standard Critical Appraisal Instrument"
-    story.append(Paragraph(
-        f"<font color='#555555'><b>Standard Applied:</b> {full_name} ({acronym}) — Validated epidemiological instrument. Appraisal generated via {APP_NAME}.</font>",
-        ParagraphStyle("Foot", parent=body_style, fontSize=7, leading=9)
-    ))
+    purpose = tool_meta.get("purpose") or "Standardized epidemiological instrument used to assess study rigour and bias."
+    scoring_rules = tool_meta.get("scoring_rules") or "Standard qualitative rating or numerical score threshold."
+    scoring_guide = tool_meta.get("scoring_guide") or ""
+
+    design_match = SEED_TAXONOMY.get(data.get("study_design", ""))
+    if design_match:
+        if not full_name or full_name == "Standard Critical Appraisal Instrument":
+            full_name = design_match.get("full_name", full_name)
+        if not purpose or "Standardized epidemiological" in purpose:
+            purpose = design_match.get("purpose", purpose)
+        if not scoring_rules or "Standard qualitative" in scoring_rules:
+            scoring_rules = design_match.get("scale", scoring_rules)
+        if not scoring_guide:
+            scoring_guide = design_match.get("scoring_guide", "")
+
+    story.append(Paragraph("<b>Appraisal Framework & Grading System Explanation</b>", sec_heading))
+
+    guide_paragraphs = []
+    if scoring_guide:
+        for line in scoring_guide.strip().split("\n"):
+            if line.strip():
+                guide_paragraphs.append(Paragraph(line.strip(), body_style))
+                guide_paragraphs.append(Spacer(1, 1))
+    else:
+        guide_paragraphs.append(Paragraph(scoring_rules, body_style))
+
+    appendix_rows = [
+        [Paragraph("Tool Applied:", bold_style), Paragraph(f"<b>{full_name} ({acronym})</b>", body_style)],
+        [Paragraph("Clinical Purpose:", bold_style), Paragraph(purpose, body_style)],
+        [Paragraph("How Grading Works:", bold_style), guide_paragraphs],
+        [Paragraph("How to Interpret:", bold_style), Paragraph("High scores or 'Low Risk' ratings mean the research methods were carried out properly without major biases. Low scores or 'High Risk' warnings highlight critical flaws (such as missing participants or unblinded testing) that could make the treatment appear more effective than it really is.", body_style)],
+    ]
+    t_app = Table(appendix_rows, colWidths=[1.8 * inch, 5.8 * inch])
+    t_app.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#EBF5F2')),
+        ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#FBFDFD')),
+        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#78BBA6')),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1E7DF')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(t_app)
 
     doc.build(story)
     buf.seek(0)
@@ -1633,11 +1761,11 @@ if "appraisal_data" in st.session_state:
         [
             {
                 "Domain": d.get("domain_name"),
-                "Criterion": d.get("evaluation_question"),
+                "Core Question": d.get("evaluation_question"),
                 "Score": d.get("rating"),
                 "Reference": d.get("location_reference"),
                 "Quote": d.get("verbatim_evidence"),
-                "Critique": d.get("critique"),
+                "Assessment Critique": d.get("critique"),
             }
             for d in data.get("domain_appraisals", [])
         ],
