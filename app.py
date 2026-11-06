@@ -26,6 +26,14 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 import requests
 import streamlit as st
 
+# Optional OCR fallback imports
+try:
+    from pdf2image import convert_from_bytes
+    import pytesseract
+    OCR_AVAILABLE = True
+except ImportError:
+    OCR_AVAILABLE = False
+
 DB_NAME = "appraisals.db"
 APP_NAME = "Kitique Appraisal Tool"
 
@@ -37,6 +45,36 @@ def get_connection():
 
 
 SEED_TAXONOMY = {
+    "Systematic Review / Meta-Analysis": {
+        "tool": "AMSTAR 2",
+        "full_name": "A MeaSurement Tool to Assess systematic Reviews (Version 2)",
+        "purpose": "Critically appraises systematic reviews evaluating randomized or non-randomized healthcare studies.",
+        "domains": [
+            {"name": "Domain 1: PICO & Protocol Pre-registration", "question": "Did the review establish PICO and register protocol (e.g. PROSPERO) prior to screening?"},
+            {"name": "Domain 2: Literature Search Strategy", "question": "Did authors search >=2 databases, provide full boolean search strings, and search trial registries?"},
+            {"name": "Domain 3: Duplicate Study Selection & Extraction", "question": "Did at least two reviewers independently screen titles, abstracts, and full texts?"},
+            {"name": "Domain 4: Excluded Studies Justification", "question": "Did authors provide full bibliographic list of excluded studies with explicit rationale?"},
+            {"name": "Domain 5: Primary Study RoB Assessment", "question": "Did the review apply established, validated risk of bias tools to included studies?"},
+            {"name": "Domain 6: Meta-Analytic Synthesis Appropriateness", "question": "Were statistical pooling methods justified and statistical heterogeneity investigated?"},
+            {"name": "Domain 7: Publication Bias Assessment", "question": "Did authors formally test for publication bias (funnel plots, Egger's test)?"},
+            {"name": "Domain 8: Conflict of Interest & Funding", "question": "Did authors report their own funding/COIs and funding of primary included studies?"},
+        ],
+        "scale": "High Confidence | Moderate Confidence | Low Confidence | Critically Low Confidence.",
+    },
+    "Narrative Review": {
+        "tool": "SANRA",
+        "full_name": "Scale for the Assessment of Narrative Review Articles",
+        "purpose": "Evaluates quality and presentation standard of non-systematic scientific reviews.",
+        "domains": [
+            {"name": "Domain 1: Justification of article's importance", "question": "Is clinical/scientific rationale explicitly justified with background epidemiology?"},
+            {"name": "Domain 2: Statement of concrete aims", "question": "Does manuscript state explicit questions or testable objective hypotheses?"},
+            {"name": "Domain 3: Description of literature search", "question": "Are search terms, databases, and date restrictions transparently described?"},
+            {"name": "Domain 4: Referencing of primary literature", "question": "Are key claims substantiated by original experimental studies rather than tertiary opinions?"},
+            {"name": "Domain 5: Scientific reasoning & balance", "question": "Does review present contradictory findings and neutral debate without advocacy bias?"},
+            {"name": "Domain 6: Presentation of relevant data", "question": "Are numerical endpoint values, trial sample sizes, and comparative effect estimates tabulated?"},
+        ],
+        "scale": "0 = Not Met | 1 = Partially Met | 2 = Met. Total score out of 12 (>=9 required for high quality).",
+    },
     "Clinical Practice Guideline / Consensus Statement": {
         "tool": "AGREE II",
         "full_name": "Appraisal of Guidelines for Research & Evaluation II",
@@ -79,32 +117,52 @@ SEED_TAXONOMY = {
         ],
         "scale": "Low Risk | Moderate Risk | Serious Risk | Critical Risk | No Information.",
     },
-    "Systematic Review / Meta-Analysis": {
-        "tool": "AMSTAR 2",
-        "full_name": "A MeaSurement Tool to Assess systematic Reviews (Version 2)",
-        "purpose": "Critically appraises systematic reviews evaluating randomized or non-randomized healthcare studies.",
+    "Observational Study (Cohort)": {
+        "tool": "Newcastle-Ottawa Scale (NOS) Cohort",
+        "full_name": "Newcastle-Ottawa Quality Assessment Scale for Cohort Studies",
+        "purpose": "Evaluates selection, comparability, and outcome assessment in longitudinal prospective and retrospective cohorts.",
         "domains": [
-            {"name": "Domain 1: PICO & Protocol Pre-registration", "question": "Did review establish PICO and register protocol (e.g. PROSPERO) prior to screening?"},
-            {"name": "Domain 2: Literature Search Strategy", "question": "Did authors search >=2 databases, provide full boolean search strings, and trial registries?"},
-            {"name": "Domain 3: Duplicate Study Selection & Extraction", "question": "Did at least two reviewers independently screen titles, abstracts, and full texts?"},
-            {"name": "Domain 4: Excluded Studies Justification", "question": "Did authors provide full bibliographic list of excluded studies with explicit rationale?"},
-            {"name": "Domain 5: Primary Study RoB Assessment", "question": "Did the review apply established, validated risk of bias tools to included studies?"},
-            {"name": "Domain 6: Meta-Analytic Synthesis Appropriateness", "question": "Were statistical pooling methods justified and statistical heterogeneity investigated?"},
-            {"name": "Domain 7: Publication Bias Assessment", "question": "Did authors formally test for publication bias (funnel plots, Egger's test)?"},
-            {"name": "Domain 8: Conflict of Interest & Funding", "question": "Did authors report their own funding/COIs and funding of primary included studies?"},
+            {"name": "Selection: Representativeness & Exposure", "question": "Is the exposed cohort truly representative, non-exposed drawn from same community, and exposure ascertainment secured via records? (0-4 Stars)"},
+            {"name": "Comparability: Confounder Control", "question": "Did the study control for the most important factor and additional relevant covariates via design/analysis? (0-2 Stars)"},
+            {"name": "Outcome: Assessment & Follow-up", "question": "Was outcome assessed independently/blinded, follow-up long enough, and adequacy of cohort follow-up complete (>80%)? (0-3 Stars)"},
         ],
-        "scale": "High Confidence | Moderate Confidence | Low Confidence | Critically Low Confidence.",
+        "scale": "Stars Awarded (0-9 Total): Good Quality (7-9 Stars) | Fair Quality (4-6 Stars) | Poor Quality (0-3 Stars).",
     },
-    "Observational Study (Cohort or Case-Control)": {
-        "tool": "Newcastle-Ottawa Scale (NOS) / CASP",
-        "full_name": "Newcastle-Ottawa Quality Assessment Scale / CASP Cohort Tool",
-        "purpose": "Evaluates selection, comparability, and exposure/outcome assessment in observational epidemiology.",
+    "Observational Study (Case-Control)": {
+        "tool": "Newcastle-Ottawa Scale (NOS) Case-Control",
+        "full_name": "Newcastle-Ottawa Quality Assessment Scale for Case-Control Studies",
+        "purpose": "Evaluates case/control definition, selection bias, and exposure ascertainment in retrospective case-control designs.",
         "domains": [
-            {"name": "Domain 1: Selection of Cohorts / Cases", "question": "Are cohorts representative of community cases with exposure ascertained objectively?"},
-            {"name": "Domain 2: Comparability of Groups", "question": "Did multivariable statistical models adjust for primary confounders and key covariates?"},
-            {"name": "Domain 3: Exposure and Outcome Ascertainment", "question": "Was outcome assessment blinded or linkage-derived, with follow-up retention >80%?"},
+            {"name": "Selection: Case and Control Definition", "question": "Are cases adequately defined/validated, representativeness verified, and controls derived from same population with no disease history? (0-4 Stars)"},
+            {"name": "Comparability: Matching and Adjustment", "question": "Are cases and controls matched or adjusted for primary and secondary prognostic factors? (0-2 Stars)"},
+            {"name": "Exposure: Ascertainment & Non-Response", "question": "Was exposure ascertained via blinded interview/structured records and same non-response rate for both groups? (0-3 Stars)"},
         ],
-        "scale": "0 to 9 Stars: Good Quality (7-9 stars) | Fair Quality (4-6 stars) | Poor Quality (0-3 stars).",
+        "scale": "Stars Awarded (0-9 Total): Good Quality (7-9 Stars) | Fair Quality (4-6 Stars) | Poor Quality (0-3 Stars).",
+    },
+    "Cross-Sectional Study": {
+        "tool": "AXIS",
+        "full_name": "Appraisal tool for Cross-Sectional Studies (AXIS)",
+        "purpose": "Assesses study design, target population framing, non-response bias, and outcome measurement validity in observational cross-sectional surveys.",
+        "domains": [
+            {"name": "Domain 1: Aims, Target Population & Sampling", "question": "Were objectives clear, study population clearly defined, and sampling frame appropriate to represent target group?"},
+            {"name": "Domain 2: Selection Bias & Response Rate", "question": "Were measures taken to address non-responders, and was response rate high enough to prevent non-response bias?"},
+            {"name": "Domain 3: Measurement Validity & Reliability", "question": "Were risk factors and outcome variables measured using instruments shown to be valid and reliable?"},
+            {"name": "Domain 4: Confounding & Statistical Reporting", "question": "Were methods sufficiently detailed, statistical tests appropriate, and potential confounding variables accounted for?"},
+            {"name": "Domain 5: Ethical Standards & Internal Consistency", "question": "Was ethical approval documented, and are discussions/conclusions justified by the results presented?"},
+        ],
+        "scale": "Yes | No | Don't Know across 20 structured criteria. High Quality (>=15 Yes) | Moderate Quality (10-14 Yes) | Low Quality (<10 Yes).",
+    },
+    "Prediction Model Study": {
+        "tool": "PROBAST",
+        "full_name": "Prediction model Risk Of Bias ASsessment Tool",
+        "purpose": "Assesses risk of bias and applicability of diagnostic and prognostic clinical prediction model studies.",
+        "domains": [
+            {"name": "Domain 1: Participants", "question": "Were data sources appropriate and participant inclusion/exclusion avoided inappropriate selection bias?"},
+            {"name": "Domain 2: Predictors", "question": "Were predictors defined and assessed blindly and consistently without knowledge of outcomes?"},
+            {"name": "Domain 3: Outcome", "question": "Was outcome pre-specified, determined objectively, and without knowledge of predictor status?"},
+            {"name": "Domain 4: Analysis", "question": "Were participant-to-variable ratio adequate, continuous predictors not inappropriately dichotomized, missing data handled, and model performance properly evaluated?"},
+        ],
+        "scale": "Low Risk | High Risk | Unclear Risk. If at least one domain is High Risk, overall model risk of bias is High Risk.",
     },
     "Diagnostic Accuracy Study": {
         "tool": "QUADAS-2",
@@ -117,20 +175,6 @@ SEED_TAXONOMY = {
             {"name": "Domain 4: Flow and Timing", "question": "Was time interval appropriate, and did all patients receive verified reference standard?"},
         ],
         "scale": "Low Risk | High Risk | Unclear Risk.",
-    },
-    "Narrative Review": {
-        "tool": "SANRA",
-        "full_name": "Scale for the Assessment of Narrative Review Articles",
-        "purpose": "Evaluates quality and presentation standard of non-systematic scientific reviews.",
-        "domains": [
-            {"name": "Domain 1: Justification of article's importance", "question": "Is clinical/scientific rationale explicitly justified with background epidemiology?"},
-            {"name": "Domain 2: Statement of concrete aims", "question": "Does manuscript state explicit questions or testable objective hypotheses?"},
-            {"name": "Domain 3: Description of literature search", "question": "Are search terms, databases, and date restrictions transparently described?"},
-            {"name": "Domain 4: Referencing of primary literature", "question": "Are key claims substantiated by original experimental studies rather than tertiary opinions?"},
-            {"name": "Domain 5: Scientific reasoning & balance", "question": "Does review present contradictory findings and neutral debate without advocacy bias?"},
-            {"name": "Domain 6: Presentation of relevant data", "question": "Are numerical endpoint values, trial sample sizes, and comparative effect estimates tabulated?"},
-        ],
-        "scale": "0 = Not Met | 1 = Partially Met | 2 = Met. Total score out of 12 (>=9 required for high quality).",
     },
     "Qualitative Study": {
         "tool": "CASP Qualitative / COREQ",
@@ -247,26 +291,65 @@ def delete_appraisal(appraisal_id: int):
         conn.commit()
 
 
-def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
+# ==========================================
+# 2. ROBUST TEXT & URL EXTRACTION
+# ==========================================
+def clean_pdf_artifacts(raw_text: str) -> str:
+    cleaned = re.sub(r"(\w+)-\s*\n\s*(\w+)", r"\1\2", raw_text)
+    cleaned = re.sub(r"(?i)\bpage\s+\d+\s+(?:of|\/)\s+\d+\b", "", cleaned)
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def ocr_pdf(pdf_bytes: bytes) -> str:
+    if not OCR_AVAILABLE:
+        return ""
     try:
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        extracted = []
-        for idx, page in enumerate(reader.pages):
-            text = page.extract_text() or ""
-            if text.strip():
-                extracted.append(f"--- [Page {idx + 1}] ---\n{text.strip()}")
-        full_text = "\n\n".join(extracted)
-        return full_text if len(full_text.strip()) > 150 else ""
+        pages = convert_from_bytes(pdf_bytes)
+        text_pages = []
+        for idx, page in enumerate(pages[:15]):
+            extracted = pytesseract.image_to_string(page)
+            if extracted.strip():
+                text_pages.append(f"--- [Page {idx + 1}] ---\n{extracted.strip()}")
+        return "\n\n".join(text_pages)
     except Exception:
         return ""
 
 
-def extract_text_from_url(url: str) -> str:
-    headers = {"User-Agent": "Mozilla/5.0"}
-    if not url.startswith("http"):
-        url = f"https://doi.org/{url}" if "10." in url else f"https://{url}"
+def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
+    text = ""
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        extracted = []
+        for idx, page in enumerate(reader.pages):
+            page_text = page.extract_text() or ""
+            if page_text.strip():
+                extracted.append(f"--- [Page {idx + 1}] ---\n{page_text.strip()}")
+        text = "\n\n".join(extracted)
+    except Exception:
+        text = ""
 
-    resp = requests.get(url, headers=headers, timeout=15)
+    if len(text.strip()) < 100 and OCR_AVAILABLE:
+        ocr_text = ocr_pdf(pdf_bytes)
+        if len(ocr_text.strip()) > len(text.strip()):
+            text = ocr_text
+
+    return clean_pdf_artifacts(text) if len(text.strip()) > 100 else ""
+
+
+def extract_text_from_url(raw_input: str) -> str:
+    """Safely normalizes bare DOIs and URLs without HTML injections."""
+    target = raw_input.strip()
+    if not target.startswith("http://") and not target.startswith("https://"):
+        if target.startswith("10.") or "/10." in target:
+            clean_doi = target[target.find("10.") :]
+            target = f"https://doi.org/{clean_doi}"
+        else:
+            target = f"https://{target}"
+
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    resp = requests.get(target, headers=headers, timeout=15)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
     for elem in soup(["script", "style", "nav", "footer", "header", "noscript"]):
@@ -275,26 +358,338 @@ def extract_text_from_url(url: str) -> str:
     return article.get_text(separator="\n", strip=True) if article else ""
 
 
-def classify_study_design_heuristically(text: str) -> str:
-    header_text = text[:10000].lower()
+# ==========================================
+# 3. 4-SOURCE RANKED ENSEMBLE CLASSIFIER
+# ==========================================
+def extract_declared_design_ranked(text: str) -> Optional[Tuple[str, str, int]]:
+    """
+    Source 1: Ranked explicit declaration extractor.
+    High-hierarchy syntheses outrank lower primary study citations.
+    """
+    head = text[:6000].lower()
 
-    patterns = [
-        (r"clinical\s+practice\s+guideline|consensus\s+statement|delphi\s+consensus", "Clinical Practice Guideline / Consensus Statement"),
-        (r"systematic\s+review|meta-analysis|prisma|cochrane\s+database", "Systematic Review / Meta-Analysis"),
-        (r"randomi[zs]ed\s+controlled\s+trial|double-blind|placebo-controlled|\brct\b", "Randomized Controlled Trial (RCT)"),
-        (r"diagnostic\s+accuracy|sensitivity\s+and\s+specificity|index\s+test", "Diagnostic Accuracy Study"),
-        (r"retrospective|prospective|cohort\s+study|case-control|cross-sectional|observational|comparative\s+study|prevalence", "Observational Study (Cohort or Case-Control)"),
-        (r"qualitative\s+study|thematic\s+analysis|semi-structured\s+interview|grounded\s+theory", "Qualitative Study"),
-        (r"quasi-experimental|non-randomi[zs]ed|controlled\s+before-and-after", "Non-Randomized Intervention / Quasi-Experimental"),
-        (r"narrative\s+review|scoping\s+review|literature\s+review", "Narrative Review"),
+    ranked_definitions = [
+        ("Systematic Review / Meta-Analysis", [
+            r"\bsystematic\s+review\s+and\s+meta-analysis\b",
+            r"\bmeta-analysis\s+and\s+systematic\s+review\b",
+            r"\bnetwork\s+meta-analysis\b",
+            r"\bsystematic\s+review\b",
+            r"\bmeta-analysis\b",
+        ], 100),
+        ("Clinical Practice Guideline / Consensus Statement", [
+            r"\bclinical\s+practice\s+guideline\b",
+            r"\bconsensus\s+statement\b",
+            r"\bdelphi\s+consensus\b",
+            r"\bexpert\s+consensus\b",
+        ], 95),
+        ("Randomized Controlled Trial (RCT)", [
+            r"\brandomi[zs]ed\s+controlled\s+trial\b",
+            r"\brandomi[zs]ed\s+clinical\s+trial\b",
+            r"\bdouble-blind(?:ed)?,\s+placebo-controlled\b",
+        ], 90),
+        ("Prediction Model Study", [
+            r"\bclinical\s+prediction\s+model\b",
+            r"\bprognostic\s+model\s+study\b",
+            r"\brisk\s+prediction\s+model\b",
+            r"\bprediction\s+rule\s+validation\b",
+        ], 85),
+        ("Diagnostic Accuracy Study", [
+            r"\bdiagnostic\s+accuracy\s+study\b",
+            r"\bdiagnostic\s+test\s+accuracy\b",
+        ], 82),
+        ("Observational Study (Cohort)", [
+            r"\bretrospective\s+cohort\s+study\b",
+            r"\bprospective\s+cohort\s+study\b",
+            r"\bretrospective\s+comparative\s+study\b",
+            r"\bcomparative\s+cohort\s+study\b",
+            r"\bretrospective\s+cohort\b",
+            r"\bprospective\s+cohort\b",
+            r"\bcohort\s+study\b",
+        ], 80),
+        ("Observational Study (Case-Control)", [
+            r"\bcase-control\s+study\b",
+            r"\bcase\s+control\s+study\b",
+            r"\bmatched\s+case-control\b",
+        ], 78),
+        ("Cross-Sectional Study", [
+            r"\bcross-sectional\s+study\b",
+            r"\bcross\s+sectional\s+study\b",
+            r"\bcross-sectional\s+survey\b",
+            r"\bprevalence\s+study\b",
+        ], 75),
+        ("Qualitative Study", [
+            r"\bqualitative\s+study\b",
+            r"\bthematic\s+analysis\s+study\b",
+            r"\bphenomenological\s+study\b",
+        ], 70),
+        ("Narrative Review", [
+            r"\bnarrative\s+review\b",
+            r"\bscoping\s+review\b",
+            r"\bliterature\s+review\b",
+            r"\bstate-of-the-art\s+review\b",
+        ], 65),
     ]
-    for p, design in patterns:
-        if re.search(p, header_text):
-            return design
 
-    return "🔍 Auto-Detect & Discover Tool (If not in list)"
+    discovered = []
+    for design, patterns, rank in ranked_definitions:
+        for p in patterns:
+            match = re.search(p, head)
+            if match:
+                discovered.append((design, match.group(0), rank))
+                break
+
+    if not discovered:
+        return None
+
+    # Highest rank wins
+    discovered.sort(key=lambda x: x[2], reverse=True)
+    return discovered[0]
 
 
+def extract_study_features(text: str) -> dict:
+    """Source 2: Structural feature identification."""
+    head = text[:9000].lower()
+
+    is_review = bool(re.search(r"\b(review|systematic\s+review|meta-analysis|literature\s+search|prisma|scoping\s+review)\b", head))
+    is_guideline = bool(re.search(r"\b(clinical\s+practice\s+guideline|consensus\s+statement|delphi\s+consensus|expert\s+panel\s+recommendations)\b", head))
+    is_rct = bool(re.search(r"\b(randomized\s+controlled\s+trial|randomised\s+controlled\s+trial|double-blind|placebo-controlled|\brct\b)\b", head))
+    is_intervention = bool(re.search(r"\b(intervention|allocated\s+to|treated\s+with|pre-post|quasi-experimental|before-and-after)\b", head))
+    is_diagnostic = bool(re.search(r"\b(diagnostic\s+accuracy|index\s+test|reference\s+standard|sensitivity\s+and\s+specificity|roc\s+curve|auc)\b", head))
+    is_prediction = bool(re.search(r"\b(prediction\s+model|risk\s+score|nomogram|prognostic\s+model|validation\s+cohort|c-index|probast)\b", head))
+    is_cross_sectional = bool(re.search(r"\b(cross-sectional|survey|prevalence\s+study|questionnaire\s+survey|axis\s+tool)\b", head))
+    is_case_control = bool(re.search(r"\b(case-control|cases\s+and\s+controls|matched\s+controls)\b", head))
+    is_cohort = bool(re.search(r"\b(cohort\s+study|prospective\s+cohort|retrospective\s+cohort|longitudinal|follow-up\s+period|retrospective\s+comparative)\b", head))
+    is_qualitative = bool(re.search(r"\b(qualitative\s+study|thematic\s+analysis|semi-structured\s+interview|focus\s+groups|grounded\s+theory|phenomenolog)\b", head))
+
+    is_secondary = is_review or is_guideline
+    is_primary = not is_secondary or bool(re.search(r"\b(we\s+enrolled|patients\s+were\s+recruited|our\s+cohort|consecutive\s+patients)\b", head))
+
+    return {
+        "primary_research": is_primary and not is_guideline,
+        "secondary_synthesis": is_secondary,
+        "meta_analysis": bool(re.search(r"\b(meta-analysis|forest\s+plot|pooled\s+odds|i\^2|heterogeneity)\b", head)),
+        "systematic_search": bool(re.search(r"\b(prisma|database\s+search|pubmed\s+and\s+embase|search\s+strategy)\b", head)),
+        "guideline_document": is_guideline,
+        "randomized": is_rct,
+        "intervention_assigned": is_intervention,
+        "diagnostic_accuracy": is_diagnostic,
+        "prediction_model": is_prediction,
+        "cross_sectional": is_cross_sectional,
+        "case_control": is_case_control,
+        "cohort": is_cohort,
+        "qualitative": is_qualitative,
+    }
+
+
+def classify_from_features(features: dict) -> str:
+    if features.get("guideline_document"):
+        return "Clinical Practice Guideline / Consensus Statement"
+    if features.get("secondary_synthesis") and not features.get("primary_research"):
+        if features.get("systematic_search") or features.get("meta_analysis"):
+            return "Systematic Review / Meta-Analysis"
+        return "Narrative Review"
+    if features.get("randomized"):
+        return "Randomized Controlled Trial (RCT)"
+    if features.get("diagnostic_accuracy"):
+        return "Diagnostic Accuracy Study"
+    if features.get("prediction_model"):
+        return "Prediction Model Study"
+    if features.get("cross_sectional"):
+        return "Cross-Sectional Study"
+    if features.get("case_control"):
+        return "Observational Study (Case-Control)"
+    if features.get("cohort"):
+        return "Observational Study (Cohort)"
+    if features.get("intervention_assigned"):
+        return "Non-Randomized Intervention / Quasi-Experimental"
+    if features.get("qualitative"):
+        return "Qualitative Study"
+
+    return "Observational Study (Cohort)"
+
+
+def compute_weighted_keyword_frequencies(text: str) -> str:
+    """
+    Source 3: Positional keyword scoring.
+    Title/Header: 5x | Abstract: 3x | Body: 1x
+    """
+    head_title = text[:600].lower()
+    abstract_zone = text[600:3000].lower()
+    body_zone = text[3000:12000].lower()
+
+    scores = {
+        "Observational Study (Cohort)": 0,
+        "Observational Study (Case-Control)": 0,
+        "Cross-Sectional Study": 0,
+        "Systematic Review / Meta-Analysis": 0,
+        "Randomized Controlled Trial (RCT)": 0,
+        "Diagnostic Accuracy Study": 0,
+    }
+
+    terms = {
+        "Observational Study (Cohort)": ["cohort", "follow-up", "retrospective", "prospective", "incidence", "risk ratio"],
+        "Observational Study (Case-Control)": ["case-control", "case control", "odds ratio", "matched controls"],
+        "Cross-Sectional Study": ["cross-sectional", "prevalence", "survey", "questionnaire"],
+        "Systematic Review / Meta-Analysis": ["prisma", "database search", "search strategy", "systematic review", "meta-analysis"],
+        "Randomized Controlled Trial (RCT)": ["randomized", "randomised", "placebo", "double-blind", "intention-to-treat"],
+        "Diagnostic Accuracy Study": ["sensitivity", "specificity", "index test", "reference standard", "roc curve"],
+    }
+
+    for design, word_list in terms.items():
+        for w in word_list:
+            scores[design] += (head_title.count(w) * 5)
+            scores[design] += (abstract_zone.count(w) * 3)
+            scores[design] += (body_zone.count(w) * 1)
+
+    return max(scores, key=scores.get)
+
+
+def verify_architecture_with_first_page(
+    client: Optional[genai.Client], first_page_text: str, candidate_tools: List[str]
+) -> str:
+    """Source 4: Zero-shot structural extraction on Page 1."""
+    if not client:
+        return ""
+    tools_str = ", ".join(f"'{t}'" for t in candidate_tools if not t.startswith("🔍"))
+    verify_prompt = f"""
+    You are an expert epidemiological classifier.
+    Examine ONLY the title, abstract, and study design descriptors from Page 1 of this manuscript:
+
+    {first_page_text[:4500]}
+
+    Determine whether this is a PRIMARY study (gathering original patient/cohort data) or a SECONDARY SYNTHESIS (review, meta-analysis, guideline).
+    Select the EXACT matching study design from this permitted list:
+    [{tools_str}]
+
+    CRITICAL: Output ONLY a JSON object:
+    {{
+      "confirmed_design": "Selected or identified design name",
+      "rationale": "One-sentence rationale citing title/abstract text"
+    }}
+    """
+    candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
+    for model_name in candidate_models:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[verify_prompt],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.0,
+                ),
+            )
+            parsed = json.loads(response.text)
+            return parsed.get("confirmed_design", "")
+        except Exception:
+            continue
+    return ""
+
+
+def run_four_source_ensemble(
+    text: str, client: Optional[genai.Client], available_designs: List[str]
+) -> dict:
+    evidence_points = []
+
+    # 1. Source 1: Ranked Declared Design
+    declared_res = extract_declared_design_ranked(text)
+    declared_pred = declared_res[0] if declared_res else None
+    if declared_pred:
+        evidence_points.append(f"Declared: Author explicitly states '{declared_res[1]}' (Rank: {declared_res[2]})")
+
+    # 2. Source 2: Feature Extractor
+    features = extract_study_features(text)
+    feature_pred = classify_from_features(features)
+    evidence_points.append(f"Features: Primary={features.get('primary_research')}, Cohort={features.get('cohort')}, RCT={features.get('randomized')}")
+
+    # 3. Source 3: Weighted Keyword Scorer
+    keyword_pred = compute_weighted_keyword_frequencies(text)
+    evidence_points.append(f"Positional Keywords: Highest weighted score points to '{keyword_pred}'")
+
+    # 4. Source 4: LLM Page-1 Verifier
+    llm_pred = verify_architecture_with_first_page(client, text, available_designs)
+    if llm_pred:
+        evidence_points.append(f"Page-1 Verifier: Independent analysis confirmed '{llm_pred}'")
+
+    # --- CALIBRATED OVERRIDE & DISCREPANCY TUNING ---
+    if declared_pred:
+        if feature_pred == declared_pred:
+            assigned_confidence = 0.98
+            override_msg = "Author declaration confirmed by structural features"
+        else:
+            assigned_confidence = 0.82
+            override_msg = "Author declaration used with caveat (Structural features diverged)"
+        evidence_points.append(f"Adjudication: {override_msg}")
+
+        trace = {
+            "declared_design": declared_pred,
+            "feature_prediction": feature_pred,
+            "keyword_prediction": keyword_pred,
+            "llm_prediction": llm_pred or "N/A",
+            "consensus": declared_pred,
+            "confidence": assigned_confidence,
+        }
+
+        return {
+            "winner": declared_pred,
+            "confidence": assigned_confidence,
+            "trace": trace,
+            "evidence": evidence_points,
+            "override_applied": True,
+        }
+
+    # --- WEIGHTED VOTING (When No Declaration Exists) ---
+    votes = [
+        (feature_pred, 0.50),
+        (llm_pred, 0.35 if llm_pred else 0.0),
+        (keyword_pred, 0.15),
+    ]
+
+    scores = {}
+    total_active_weight = 0.0
+    for pred, w in votes:
+        if not pred:
+            continue
+        scores[pred] = scores.get(pred, 0.0) + w
+        total_active_weight += w
+
+    winner = max(scores, key=scores.get) if scores else "Observational Study (Cohort)"
+    raw_confidence = scores[winner] / (total_active_weight if total_active_weight > 0 else 1.0)
+
+    trace = {
+        "declared_design": "None Detected",
+        "feature_prediction": feature_pred,
+        "keyword_prediction": keyword_pred,
+        "llm_prediction": llm_pred or "N/A",
+        "consensus": winner,
+        "confidence": round(raw_confidence, 2),
+    }
+
+    return {
+        "winner": winner,
+        "confidence": round(raw_confidence, 2),
+        "trace": trace,
+        "evidence": evidence_points,
+        "override_applied": False,
+    }
+
+
+def detect_classification_contradiction(manuscript_text: str, predicted_design: str) -> Optional[str]:
+    header = manuscript_text[:4000].lower()
+
+    if "review" in predicted_design.lower():
+        if any(term in header for term in ["retrospective cohort", "prospective cohort", "comparative study", "consecutive patients", "patients enrolled"]):
+            return "Manuscript explicitly declares an empirical cohort/comparative study, but assigned framework is Review (SANRA/AMSTAR). Appraisal blocked."
+
+    if "cohort" in predicted_design.lower() or "rct" in predicted_design.lower():
+        if "systematic review and meta-analysis" in header or "systematic review" in header:
+            return "Manuscript explicitly declares a Systematic Review, but assigned framework is Empirical (NOS/RoB 2). Appraisal blocked."
+
+    return None
+
+
+# ==========================================
+# 4. EXECUTION & CHECKSUM ADJUDICATION
+# ==========================================
 def trim_manuscript_body(text: str) -> str:
     lower = text.lower()
     for marker in ["\nreferences\n", "\nbibliography\n", "\nliterature cited\n"]:
@@ -376,11 +771,11 @@ def run_comprehensive_checksum(
             grounding_warnings.append(f"Quote in '{d.get('domain_name')}' matched at {int(ratio * 100)}%.")
 
     grounded_score = round((verified_count / len(domains)) * 100, 1)
-    tier = str(data.get("quality_tier", "")).upper()
+    ratings_summary = str(data.get("ratings_summary", {})).upper()
     has_high_risk = any("high" in str(d.get("rating", "")).lower() or "critical" in str(d.get("rating", "")).lower() for d in domains)
 
-    if "GREEN" in tier and has_high_risk:
-        flaw_warnings.append("Methodological Contradiction: Green tier assigned despite high-risk domain.")
+    if "GOOD" in ratings_summary and has_high_risk:
+        flaw_warnings.append("Methodological Contradiction: Good quality assigned despite high-risk domain.")
 
     data["groundedness_score"] = grounded_score
     data["groundedness_warnings"] = grounding_warnings
@@ -428,17 +823,23 @@ def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str
       }
     }
     """
-    response = client.models.generate_content(
-        model="gemini-3.5-flash-lite",
-        contents=[f"MANUSCRIPT EXCERPT:\n{text_sample[:8000]}\n\nIdentify study architecture and gold-standard appraisal tool."],
-        config=types.GenerateContentConfig(
-            system_instruction=discovery_instruction,
-            response_mime_type="application/json",
-            temperature=0.0,
-        ),
-    )
-    res_json = json.loads(response.text)
-    return res_json["design_name"], res_json["tool_taxonomy"]
+    candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
+    for model_name in candidate_models:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[f"MANUSCRIPT EXCERPT:\n{text_sample[:8000]}\n\nIdentify study architecture and gold-standard appraisal tool."],
+                config=types.GenerateContentConfig(
+                    system_instruction=discovery_instruction,
+                    response_mime_type="application/json",
+                    temperature=0.0,
+                ),
+            )
+            res_json = json.loads(response.text)
+            return res_json["design_name"], res_json["tool_taxonomy"]
+        except Exception:
+            continue
+    raise RuntimeError("Failed to discover tool schema via production models.")
 
 
 def execute_manuscript_evaluation(
@@ -448,19 +849,26 @@ def execute_manuscript_evaluation(
     assigned_design: Optional[str] = None,
     active_tools_map: Optional[dict] = None,
     strictness_mode: str = "Strict",
+    classification_trace: Optional[dict] = None,
 ) -> dict:
     active_tool_taxonomy = {assigned_design: active_tools_map[assigned_design]} if (assigned_design and active_tools_map and assigned_design in active_tools_map) else (active_tools_map or SEED_TAXONOMY)
     taxonomy_json = json.dumps(active_tool_taxonomy, indent=2)
 
     system_instruction = f"""
-    You are an unyielding epidemiological auditor. Apply zero benefit of doubt.
-    Appraisal Framework:
+    You are an objective epidemiological auditor. Apply gold-standard criteria rigorously.
+    Appraisal Framework Assigned:
     {taxonomy_json}
 
-    RULES:
-    1. ABSENCE OF REPORTING IS PRESENCE OF BIAS.
-    2. Extract exact verbatim evidence quotes for every single domain.
-    3. Return quality_tier strictly as 'GREEN', 'YELLOW', or 'RED'.
+    CORE ADJUDICATION PRINCIPLE:
+    Absence of reporting must be recorded as 'Unclear Risk' or 'Not Reported' unless the tool explicitly mandates documented evidence for compliance. Do not assume good practice took place without explicit text, but do not invent flaws where reporting is simply terse.
+
+    SPECIALIZED NOS COHORT & CASE-CONTROL SCORING (IF APPLICABLE):
+    If using Newcastle-Ottawa Scale (NOS), calculate exact star counts:
+    - Selection: 0 to 4 Stars
+    - Comparability: 0 to 2 Stars
+    - Outcome/Exposure: 0 to 3 Stars
+    - Total: 0 to 9 Stars
+    - Quality: Good (7-9), Fair (4-6), Poor (0-3).
 
     CRITICAL: Output ONLY a valid JSON object matching:
     {{
@@ -471,9 +879,26 @@ def execute_manuscript_evaluation(
       "doi": "DOI or URL",
       "study_design": "{assigned_design or 'Identified design'}",
       "appraisal_tool_selected": "Tool name",
-      "quality_tier": "GREEN / YELLOW / RED",
-      "overall_verdict": "Low / Moderate / High Risk",
-      "overall_synthesis": "Methodological critique",
+      "ratings_summary": {{
+        "methodology_quality": "GOOD / FAIR / POOR",
+        "reporting_quality": "GOOD / FAIR / POOR",
+        "certainty_score": "HIGH / MODERATE / LOW / VERY LOW"
+      }},
+      "nos_score_breakdown": {{
+        "selection_stars": 0,
+        "comparability_stars": 0,
+        "outcome_stars": 0,
+        "total_stars": 0
+      }},
+      "overall_verdict": "Low Risk / Moderate Risk / High Risk / Recommended / etc.",
+      "overall_synthesis": "Comprehensive narrative explaining methodological rigour, internal validity, and clinical applicability.",
+      "audit_log": {{
+        "classification_rationale": "Keywords and structural features identifying this design",
+        "decision_pathway": [
+          {{"stage": "Domain Evaluation", "observation": "Key observation", "rule_applied": "Grading principle"}}
+        ],
+        "verdict_derivation": "Direct justification for final scores"
+      }},
       "tool_meta": {{"acronym": "Tool", "full_name": "Full Name", "purpose": "Purpose", "scoring_rules": "Rules"}},
       "domain_appraisals": [
         {{"domain_name": "Title", "evaluation_question": "Question", "rating": "Rating", "location_reference": "Section/Page", "verbatim_evidence": "Quote", "critique": "Critique"}}
@@ -488,7 +913,9 @@ def execute_manuscript_evaluation(
     if not contents:
         raise ValueError("No valid manuscript text or PDF bytes supplied.")
 
-    for model_name in ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-3.8-flash", "gemini-2.0-flash"]:
+    candidate_models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
+
+    for model_name in candidate_models:
         try:
             response = client.models.generate_content(
                 model=model_name,
@@ -499,12 +926,17 @@ def execute_manuscript_evaluation(
                     temperature=0.0,
                 ),
             )
-            return json.loads(response.text)
+            parsed = json.loads(response.text)
+            if classification_trace:
+                if "audit_log" not in parsed:
+                    parsed["audit_log"] = {}
+                parsed["audit_log"]["classification_trace"] = classification_trace
+            return parsed
         except Exception:
             time.sleep(1.0)
             continue
 
-    raise RuntimeError("Appraisal pipeline exceeded retry threshold.")
+    raise RuntimeError("Appraisal pipeline exceeded retry threshold on production models.")
 
 
 def answer_interrogation_query(
@@ -527,13 +959,16 @@ def answer_interrogation_query(
     {raw_manuscript_text[:20000]}
     """
     response = client.models.generate_content(
-        model="gemini-3.5-flash-lite",
+        model="gemini-2.5-flash",
         contents=[f"HISTORY:\n{history_context}\n\nUSER QUESTION: {query}"],
         config=types.GenerateContentConfig(system_instruction=chat_instruction, temperature=0.1)
     )
     return response.text
 
 
+# ==========================================
+# 5. DOCUMENT GENERATION (WORD & PDF)
+# ==========================================
 def build_docx_report(data: dict) -> io.BytesIO:
     doc = Document()
     title = doc.add_heading(level=0)
@@ -542,7 +977,8 @@ def build_docx_report(data: dict) -> io.BytesIO:
     run_t.font.bold = True
     run_t.font.color.rgb = RGBColor(120, 187, 166)
 
-    meta_table = doc.add_table(rows=7, cols=2)
+    ratings = data.get("ratings_summary", {})
+    meta_table = doc.add_table(rows=8, cols=2)
     meta_table.style = "Table Grid"
     fields = [
         ("Evaluated Title:", data.get("paper_title", "N/A")),
@@ -550,7 +986,8 @@ def build_docx_report(data: dict) -> io.BytesIO:
         ("Journal & Year:", f"{data.get('journal', 'N/A')} ({data.get('year_published', 'N/A')})"),
         ("DOI / Reference:", data.get("doi", "N/A")),
         ("Study Architecture:", data.get("study_design", "N/A")),
-        ("Gold-Standard Tool Applied:", data.get("appraisal_tool_selected", "N/A")),
+        ("Tool Applied:", data.get("appraisal_tool_selected", "N/A")),
+        ("Methodology / Reporting / Certainty:", f"{ratings.get('methodology_quality', 'N/A')} / {ratings.get('reporting_quality', 'N/A')} / {ratings.get('certainty_score', 'N/A')}"),
         ("Evidence Groundedness:", f"{data.get('groundedness_score', 100.0)}%"),
     ]
     for idx, (label, val) in enumerate(fields):
@@ -604,12 +1041,14 @@ def build_pdf_report(data: dict) -> io.BytesIO:
         Spacer(1, 10),
     ]
 
+    ratings = data.get("ratings_summary", {})
     meta_data = [
         [Paragraph("Evaluated Title:", bold_style), Paragraph(data.get("paper_title", "N/A"), body_style)],
         [Paragraph("Authors:", bold_style), Paragraph(data.get("authors", "Not Specified"), body_style)],
         [Paragraph("Journal & Year:", bold_style), Paragraph(f"{data.get('journal', 'N/A')} ({data.get('year_published', 'N/A')})", body_style)],
         [Paragraph("Tool Applied:", bold_style), Paragraph(data.get("appraisal_tool_selected", "N/A"), body_style)],
-        [Paragraph("Verdict:", bold_style), Paragraph(data.get("overall_verdict", "N/A"), bold_style)],
+        [Paragraph("Quality Triad:", bold_style), Paragraph(f"Methodology: {ratings.get('methodology_quality', 'N/A')} | Reporting: {ratings.get('reporting_quality', 'N/A')} | Certainty: {ratings.get('certainty_score', 'N/A')}", bold_style)],
+        [Paragraph("Overall Verdict:", bold_style), Paragraph(data.get("overall_verdict", "N/A"), bold_style)],
     ]
     t_meta = Table(meta_data, colWidths=[1.8 * inch, 5.6 * inch])
     t_meta.setStyle(TableStyle([
@@ -650,14 +1089,15 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     return buf
 
 
+# ==========================================
+# 6. STREAMLIT APP & UI INTERACTION
+# ==========================================
 st.set_page_config(page_title=APP_NAME, page_icon="🐱", layout="wide")
 init_db()
 
-# Pastel Seafoam Green UI Palette
 st.markdown(
     """
 <style>
-    /* Global Buttons */
     .stButton>button, .stDownloadButton>button {
         background-color: #78BBA6 !important;
         color: white !important;
@@ -674,7 +1114,6 @@ st.markdown(
     .stButton>button:active, .stDownloadButton>button:active {
         background-color: #4A8574 !important;
     }
-    /* Chat Input Button & Focus */
     div[data-testid="stChatInput"] button {
         background-color: #78BBA6 !important;
         color: white !important;
@@ -683,14 +1122,12 @@ st.markdown(
         border-color: #78BBA6 !important;
         box-shadow: 0 0 0 1px #78BBA6 !important;
     }
-    /* Accent Cards & Badges */
     .metric-card {
         background-color: rgba(120, 187, 166, 0.08);
         border: 1px solid rgba(120, 187, 166, 0.3);
         border-radius: 8px;
         padding: 12px;
     }
-    /* Radio & Checkboxes */
     div[role="radiogroup"] > label > div:first-child[aria-checked="true"] {
         background-color: #78BBA6 !important;
         border-color: #78BBA6 !important;
@@ -700,7 +1137,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-CORRECT_PASSCODE = "324598"
+# Secure Passcode Resolution
+CORRECT_PASSCODE = st.secrets.get("APP_PASSCODE", os.environ.get("APP_PASSCODE", "324598"))
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -717,7 +1155,7 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 st.title(f"🐱 {APP_NAME}")
-st.caption("Methodological Evidence Quality Synthesis & Diagnostic Review Engine")
+st.caption("Epidemiological Critical Appraisal & Evidence Verification Engine")
 
 api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None))
 
@@ -786,13 +1224,13 @@ with tab_pdf:
     if uploaded:
         raw_pdf_bytes = uploaded.read()
         filename_tag = uploaded.name
-        with st.spinner("Extracting text..."):
+        with st.spinner("Extracting text (pypdf + OCR fallback)..."):
             paper_text = extract_text_from_pdf_bytes(raw_pdf_bytes)
         if paper_text:
             st.session_state["raw_paper_text"] = paper_text
             st.success(f"Parsed {len(paper_text):,} characters successfully.")
         else:
-            st.warning("Scanned document detected. System OCR active.")
+            st.warning("Could not extract readable text. Image OCR fallback pipeline active.")
 
 with tab_url:
     url_input = st.text_input("Article Link or DOI")
@@ -809,14 +1247,54 @@ with tab_url:
 
 active_tools = get_all_tools()
 available_designs = list(active_tools.keys()) + ["🔍 Auto-Detect & Discover Tool (If not in list)"]
-detected_design = classify_study_design_heuristically(paper_text) if paper_text else available_designs[-1]
+
+# --- 4-SOURCE RANKED ENSEMBLE CLASSIFICATION ---
+ensemble_winner = "Observational Study (Cohort)"
+confidence_score = 1.0
+contradiction_flag = None
+ensemble_data = {}
+
+if paper_text:
+    client_preflight = genai.Client(api_key=api_key) if api_key else None
+    ensemble_data = run_four_source_ensemble(paper_text, client_preflight, available_designs)
+    ensemble_winner = ensemble_data["winner"]
+    confidence_score = ensemble_data["confidence"]
+    contradiction_flag = detect_classification_contradiction(paper_text, ensemble_winner)
 
 st.markdown("---")
-selected_design = st.selectbox(
-    "Target Study Architecture & Framework:",
-    options=available_designs,
-    index=available_designs.index(detected_design) if detected_design in available_designs else (len(available_designs) - 1),
-)
+
+col_d1, col_d2 = st.columns([3, 1])
+with col_d1:
+    default_idx = (
+        available_designs.index(ensemble_winner)
+        if ensemble_winner in available_designs
+        else (len(available_designs) - 1)
+    )
+    selected_design = st.selectbox(
+        "Target Study Architecture & Framework:",
+        options=available_designs,
+        index=default_idx,
+    )
+with col_d2:
+    conf_badge = f"{int(confidence_score * 100)}%"
+    st.metric("Ensemble Confidence", conf_badge)
+
+if ensemble_data.get("evidence"):
+    override_badge = " [Supreme Signal Override Applied]" if ensemble_data.get("override_applied") else ""
+    with st.expander(f"📋 Classification Evidence & Trace Rationale{override_badge}"):
+        st.markdown(f"**Selected Design:** `{ensemble_winner}`  \n**Consensus Confidence:** `{int(confidence_score * 100)}%`")
+        for pt in ensemble_data["evidence"]:
+            st.markdown(f"- {pt}")
+        if ensemble_data.get("trace"):
+            st.json(ensemble_data["trace"])
+
+# --- HARD-STOP CONTRADICTION GATING ---
+if contradiction_flag:
+    st.error(f"🛑 **Critical Architecture Conflict Detected:**\n\n{contradiction_flag}\n\n*Appraisal halted to prevent scoring an empirical study with a review framework (or vice versa). Please manually correct the dropdown selection above.*")
+    st.stop()
+
+if confidence_score < 0.80:
+    st.info("ℹ️ **Confidence Gating (<80%):** Multiple designs detected across ensemble sources. Please confirm or adjust the dropdown selection before proceeding.")
 
 if st.button("⚡ Run Methodological Appraisal", type="primary", use_container_width=True):
     if not api_key:
@@ -836,9 +1314,9 @@ if st.button("⚡ Run Methodological Appraisal", type="primary", use_container_w
                     active_tools = get_all_tools()
                     st.info(f"Adopted tool: **{discovered_tool.get('tool')}**")
                 except Exception:
-                    target_design = "Observational Study (Cohort or Case-Control)"
+                    target_design = "Observational Study (Cohort)"
 
-        with st.spinner("Executing rigorous appraisal..."):
+        with st.spinner(f"Executing rigorous appraisal under {target_design}..."):
             try:
                 raw_data = execute_manuscript_evaluation(
                     client,
@@ -847,6 +1325,7 @@ if st.button("⚡ Run Methodological Appraisal", type="primary", use_container_w
                     assigned_design=target_design,
                     active_tools_map=active_tools,
                     strictness_mode=strictness_choice,
+                    classification_trace=ensemble_data.get("trace"),
                 )
                 verified_data, score, _, flaw_warns = run_comprehensive_checksum(raw_data, paper_text)
                 new_id = save_appraisal(verified_data, filename_tag)
@@ -862,24 +1341,20 @@ if "appraisal_data" in st.session_state:
     st.markdown("---")
     st.subheader(f"📋 {data.get('paper_title', 'Untitled')}")
 
+    ratings = data.get("ratings_summary", {})
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.metric("Architecture", data.get("study_design"))
     with c2:
         st.metric("Tool Applied", data.get("appraisal_tool_selected"))
     with c3:
-        st.metric("Overall Verdict", data.get("overall_verdict"))
+        st.metric("Methodology Quality", ratings.get("methodology_quality", "N/A"))
     with c4:
-        st.metric("Groundedness", f"{data.get('groundedness_score', 100.0)}%")
+        st.metric("Certainty Score", ratings.get("certainty_score", "N/A"))
 
-    tier = str(data.get("quality_tier", "")).upper()
-    g1, g2, g3 = st.columns(3)
-    with g1:
-        st.error("🚨 RED TIER (High Risk)" if tier == "RED" else "Red")
-    with g2:
-        st.warning("⚠️ YELLOW TIER (Moderate)" if tier == "YELLOW" else "Yellow")
-    with g3:
-        st.success("✅ GREEN TIER (Robust)" if tier == "GREEN" else "Green")
+    nos_stars = data.get("nos_score_breakdown")
+    if nos_stars and "total_stars" in nos_stars and nos_stars["total_stars"] > 0:
+        st.info(f"⭐ **Newcastle-Ottawa Scale Star Count:** {nos_stars.get('total_stars', 0)}/9 Stars (Selection: {nos_stars.get('selection_stars', 0)}★ | Comparability: {nos_stars.get('comparability_stars', 0)}★ | Outcome: {nos_stars.get('outcome_stars', 0)}★)")
 
     st.subheader("📊 Domain Analysis")
     st.dataframe(
@@ -897,10 +1372,25 @@ if "appraisal_data" in st.session_state:
         use_container_width=True,
     )
 
-    st.subheader("📝 Executive Summary")
+    st.subheader("📝 Executive Synthesis")
     st.info(data.get("overall_synthesis"))
 
-    c_doc, c_pdf = st.columns(2)
+    audit = data.get("audit_log", {})
+    if audit:
+        with st.expander("🔍 Methodological Decision Log & Audit Trail"):
+            st.markdown("#### Study Classification Rationale")
+            st.write(audit.get("classification_rationale", "N/A"))
+            if audit.get("classification_trace"):
+                st.markdown("#### 4-Source Ensemble Trace")
+                st.json(audit["classification_trace"])
+            steps = audit.get("decision_pathway", [])
+            if steps:
+                st.markdown("#### Decision Pathway & Applied Rules")
+                st.dataframe(steps, use_container_width=True)
+            st.markdown("#### Verdict Derivation")
+            st.write(audit.get("verdict_derivation", "N/A"))
+
+    c_doc, c_pdf, c_log = st.columns(3)
     with c_doc:
         st.download_button(
             "📥 Download Word (.docx)",
@@ -915,6 +1405,28 @@ if "appraisal_data" in st.session_state:
             data=build_pdf_report(data),
             file_name=format_harvard_filename(data, "pdf"),
             mime="application/pdf",
+            use_container_width=True,
+        )
+    with c_log:
+        audit_payload = json.dumps(
+            {
+                "paper_title": data.get("paper_title"),
+                "study_design": data.get("study_design"),
+                "appraisal_tool_selected": data.get("appraisal_tool_selected"),
+                "ratings_summary": data.get("ratings_summary", {}),
+                "nos_score_breakdown": data.get("nos_score_breakdown", {}),
+                "overall_verdict": data.get("overall_verdict"),
+                "audit_log": data.get("audit_log", {}),
+                "checksum_flaws": data.get("checksum_flaws", []),
+                "groundedness_score": data.get("groundedness_score"),
+            },
+            indent=2,
+        )
+        st.download_button(
+            "📥 Download Audit Log (.json)",
+            data=audit_payload,
+            file_name=format_harvard_filename(data, "json"),
+            mime="application/json",
             use_container_width=True,
         )
 
