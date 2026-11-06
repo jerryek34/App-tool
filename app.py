@@ -366,7 +366,6 @@ def extract_text_from_url(raw_input: str) -> str:
 # 3. HARVARD CITATION & AUTHOR FORMATTER (MAX 3)
 # ==========================================
 def format_harvard_authors(raw_authors: str, max_authors: int = 3) -> str:
-    """Formats author names to concise Harvard style capping at max_authors."""
     if not raw_authors or str(raw_authors).strip().lower() in ["not specified", "unspecified", "unknown", "n/a", "none"]:
         return "Not Specified"
 
@@ -381,12 +380,10 @@ def format_harvard_authors(raw_authors: str, max_authors: int = 3) -> str:
         if len(tokens) == 1:
             parsed_authors.append(tokens[0].title())
         elif len(tokens[0]) <= 2 and len(tokens) > 1 and len(tokens[-1]) > 2:
-            # Format: Initial Surname -> "Surname, I."
             surname = tokens[-1].title()
             initials = "".join([f"{t[0].upper()}." for t in tokens[:-1]])
             parsed_authors.append(f"{surname}, {initials}")
         else:
-            # Format: GivenName Surname -> "Surname, G."
             surname = tokens[-1].title()
             initials = "".join([f"{t[0].upper()}." for t in tokens[:-1]])
             parsed_authors.append(f"{surname}, {initials}")
@@ -897,8 +894,16 @@ def execute_manuscript_evaluation(
     AUTHORS CITATION FORMAT:
     Extract up to 3 primary authors in Harvard format (e.g. 'Smith, J., Doe, A. and Brown, C.' or 'Smith, J. et al.' if >3).
 
+    METHODOLOGICAL SYNTHESIS FORMATTING RULE:
+    The overall synthesis must NOT be a wall of academic jargon. Provide it as 4 to 6 clear, easy-to-read bullet points written in simple, accessible language:
+    - Point 1 (Study Setup): Plain-language summary of what the authors did and who was tested.
+    - Point 2 (Key Strengths): What was done well and why the results are trustworthy.
+    - Point 3 (Key Methodological Vulnerabilities): Major risks of bias, missing details, confounding, or unblinded assessment explained simply.
+    - Point 4 (Practical Limitations): What stops us from applying this to every patient/setting (e.g. sample size, short follow-up).
+    - Point 5 (Bottom-Line Reliability): Final verdict on how reliable these findings are for clinical decision-making.
+
     STORY-LIKE NARRATIVE ARC SUMMARY (4 TO 10 BULLETS REQUIRED):
-    Provide a compelling, chronological story-like summary of the entire paper and its post-grading appraisal:
+    Provide a compelling, chronological story-like summary of the entire paper and its post-grading appraisal in plain words:
     1. Act I (The Clinical Dilemma & Spark): What unresolved problem or uncertainty prompted this inquiry?
     2. Act II (The Patient Cohort & Investigative Journey): Who was studied, how were they followed/intervened, and under what conditions?
     3. Act III (The Empirical Revelations): What did the data actually show regarding the primary endpoints?
@@ -926,7 +931,13 @@ def execute_manuscript_evaluation(
         "total_stars": 0
       }},
       "overall_verdict": "Low Risk / Moderate Risk / High Risk / Recommended / etc.",
-      "overall_synthesis": "Comprehensive narrative explaining methodological rigour, internal validity, and clinical applicability.",
+      "overall_synthesis": [
+        "Study Setup: [Plain language summary]",
+        "Methodological Strengths: [What was done well in simple terms]",
+        "Risks of Bias & Red Flags: [Plain explanation of flaws or missing data]",
+        "Real-World Limitations: [Who this might not apply to]",
+        "Auditor Verdict: [Bottom line in plain English]"
+      ],
       "practical_takeaways": [
         "Primary clinical finding or translational headline",
         "Key methodological caveat / risk of bias limitation to consider before clinical adoption",
@@ -985,8 +996,7 @@ def execute_manuscript_evaluation(
                     raw_text = re.sub(r"\n```$", "", raw_text)
 
                 parsed = json.loads(raw_text)
-                
-                # Standardize authors to Harvard format (<=3 authors)
+
                 if "authors" in parsed:
                     parsed["authors"] = format_harvard_authors(parsed["authors"], max_authors=3)
 
@@ -1019,8 +1029,8 @@ def answer_interrogation_query(
     history_context = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in chat_history[-6:]])
     chat_instruction = f"""
     You are an objective methodological audit assistant.
-    Answer user queries regarding the appraisal report and source manuscript.
-    Cite specific lines, sections, and quotes. Do not mention external technology.
+    Answer user queries regarding the appraisal report and source manuscript in simple, direct language.
+    Avoid overly dense jargon. Cite specific lines, sections, and quotes clearly.
 
     APPRAISAL JSON:
     {json.dumps(appraisal_json, indent=1)}
@@ -1116,8 +1126,19 @@ def build_docx_report(data: dict) -> io.BytesIO:
         row_cells[3].paragraphs[0].add_run(str(item.get("critique")))
 
     doc.add_paragraph("")
-    doc.add_heading("2. Executive Synthesis", level=1)
-    doc.add_paragraph(data.get("overall_synthesis", ""))
+    doc.add_heading("2. Methodological Synthesis & Discussion (Key Points)", level=1)
+    synth = data.get("overall_synthesis", [])
+    if isinstance(synth, list):
+        for pt in synth:
+            parts = pt.split(":", 1)
+            p_synth = doc.add_paragraph(style='List Bullet')
+            if len(parts) == 2:
+                p_synth.add_run(parts[0] + ":").bold = True
+                p_synth.add_run(parts[1])
+            else:
+                p_synth.add_run(pt)
+    else:
+        doc.add_paragraph(str(synth))
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -1343,8 +1364,32 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_domains)
     story.append(Spacer(1, 10))
 
-    story.append(Paragraph("2. Methodological Synthesis & Discussion", h2_style))
-    story.append(Paragraph(data.get("overall_synthesis", "Synthesis not reported."), body_style))
+    # --- 2. Methodological Synthesis (Formatted in Clear, Distinct Points) ---
+    story.append(Paragraph("2. Methodological Synthesis & Discussion (Plain-English Points)", h2_style))
+    synth = data.get("overall_synthesis", [])
+    synth_rows = []
+    if isinstance(synth, list):
+        for idx, pt in enumerate(synth, 1):
+            synth_rows.append([
+                Paragraph(f"<b>Point {idx}:</b>", bold_style),
+                Paragraph(pt, takeaway_style)
+            ])
+    else:
+        synth_rows.append([
+            Paragraph("<b>Summary:</b>", bold_style),
+            Paragraph(str(synth), takeaway_style)
+        ])
+
+    t_synth = Table(synth_rows, colWidths=[1.8 * inch, 5.6 * inch])
+    t_synth.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F4F9F7')),
+        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#78BBA6')),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1E7DF')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(t_synth)
     story.append(Spacer(1, 10))
 
     story.append(Paragraph("3. Appraisal Framework & Standards Appendix", h2_style))
@@ -1685,8 +1730,17 @@ if "appraisal_data" in st.session_state:
         use_container_width=True,
     )
 
-    st.subheader("📝 Executive Synthesis")
-    st.info(data.get("overall_synthesis"))
+    st.subheader("📝 Methodological Synthesis & Discussion (Plain-English Points)")
+    synth = data.get("overall_synthesis", [])
+    if isinstance(synth, list):
+        for idx, pt in enumerate(synth, 1):
+            parts = pt.split(":", 1)
+            if len(parts) == 2:
+                st.markdown(f"**• {parts[0].strip()}:** {parts[1].strip()}")
+            else:
+                st.markdown(f"**•** {pt}")
+    else:
+        st.info(str(synth))
 
     audit = data.get("audit_log", {})
     if audit:
@@ -1730,6 +1784,7 @@ if "appraisal_data" in st.session_state:
                 "ratings_summary": data.get("ratings_summary", {}),
                 "nos_score_breakdown": data.get("nos_score_breakdown", {}),
                 "overall_verdict": data.get("overall_verdict"),
+                "overall_synthesis": data.get("overall_synthesis", []),
                 "practical_takeaways": data.get("practical_takeaways", []),
                 "narrative_arc_summary": data.get("narrative_arc_summary", []),
                 "audit_log": data.get("audit_log", {}),
