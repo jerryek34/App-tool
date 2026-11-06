@@ -1716,7 +1716,7 @@ if "appraisal_data" in st.session_state:
         )
 
     st.markdown("---")
-    st.subheader("💬 Chatbot Assistant")
+    st.subheader("💬 Ki's Assistant")
     for msg in st.session_state["chat_history"]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
