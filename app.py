@@ -37,6 +37,15 @@ except ImportError:
 DB_NAME = "appraisals.db"
 APP_NAME = "Kitique Appraisal Tool"
 
+# Free-tier, low-latency, active Google AI Studio models
+FREE_ACTIVE_MODELS = [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.8-flash",
+]
+
 
 def get_connection():
     conn = sqlite3.connect(DB_NAME, check_same_thread=False)
@@ -339,7 +348,7 @@ def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
 
 
 def extract_text_from_url(raw_input: str) -> str:
-    """Safely normalizes bare DOIs and URLs without HTML injections."""
+    """Normalizes bare DOIs and URLs without HTML injections."""
     target = raw_input.strip()
     if not target.startswith("http://") and not target.startswith("https://"):
         if target.startswith("10.") or "/10." in target:
@@ -362,10 +371,7 @@ def extract_text_from_url(raw_input: str) -> str:
 # 3. 4-SOURCE RANKED ENSEMBLE CLASSIFIER
 # ==========================================
 def extract_declared_design_ranked(text: str) -> Optional[Tuple[str, str, int]]:
-    """
-    Source 1: Ranked explicit declaration extractor.
-    High-hierarchy syntheses outrank lower primary study citations.
-    """
+    """Source 1: Ranked explicit declaration extractor."""
     head = text[:6000].lower()
 
     ranked_definitions = [
@@ -441,13 +447,12 @@ def extract_declared_design_ranked(text: str) -> Optional[Tuple[str, str, int]]:
     if not discovered:
         return None
 
-    # Highest rank wins
     discovered.sort(key=lambda x: x[2], reverse=True)
     return discovered[0]
 
 
 def extract_study_features(text: str) -> dict:
-    """Source 2: Structural feature identification."""
+    """Source 2: Structural feature extraction."""
     head = text[:9000].lower()
 
     is_review = bool(re.search(r"\b(review|systematic\s+review|meta-analysis|literature\s+search|prisma|scoping\s+review)\b", head))
@@ -509,10 +514,7 @@ def classify_from_features(features: dict) -> str:
 
 
 def compute_weighted_keyword_frequencies(text: str) -> str:
-    """
-    Source 3: Positional keyword scoring.
-    Title/Header: 5x | Abstract: 3x | Body: 1x
-    """
+    """Source 3: Positional keyword scoring."""
     head_title = text[:600].lower()
     abstract_zone = text[600:3000].lower()
     body_zone = text[3000:12000].lower()
@@ -547,7 +549,7 @@ def compute_weighted_keyword_frequencies(text: str) -> str:
 def verify_architecture_with_first_page(
     client: Optional[genai.Client], first_page_text: str, candidate_tools: List[str]
 ) -> str:
-    """Source 4: Zero-shot structural extraction on Page 1."""
+    """Source 4: Zero-shot structural extraction using active models."""
     if not client:
         return ""
     tools_str = ", ".join(f"'{t}'" for t in candidate_tools if not t.startswith("🔍"))
@@ -567,8 +569,7 @@ def verify_architecture_with_first_page(
       "rationale": "One-sentence rationale citing title/abstract text"
     }}
     """
-    candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
-    for model_name in candidate_models:
+    for model_name in FREE_ACTIVE_MODELS:
         try:
             response = client.models.generate_content(
                 model=model_name,
@@ -594,7 +595,7 @@ def run_four_source_ensemble(
     declared_res = extract_declared_design_ranked(text)
     declared_pred = declared_res[0] if declared_res else None
     if declared_pred:
-        evidence_points.append(f"Declared: Author explicitly states '{declared_res[1]}' (Rank: {declared_res[2]})")
+        evidence_points.append(f"Declared: Author explicitly states '{declared_res[1]}' (Priority Rank: {declared_res[2]})")
 
     # 2. Source 2: Feature Extractor
     features = extract_study_features(text)
@@ -610,7 +611,6 @@ def run_four_source_ensemble(
     if llm_pred:
         evidence_points.append(f"Page-1 Verifier: Independent analysis confirmed '{llm_pred}'")
 
-    # --- CALIBRATED OVERRIDE & DISCREPANCY TUNING ---
     if declared_pred:
         if feature_pred == declared_pred:
             assigned_confidence = 0.98
@@ -637,7 +637,6 @@ def run_four_source_ensemble(
             "override_applied": True,
         }
 
-    # --- WEIGHTED VOTING (When No Declaration Exists) ---
     votes = [
         (feature_pred, 0.50),
         (llm_pred, 0.35 if llm_pred else 0.0),
@@ -823,8 +822,7 @@ def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str
       }
     }
     """
-    candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
-    for model_name in candidate_models:
+    for model_name in FREE_ACTIVE_MODELS:
         try:
             response = client.models.generate_content(
                 model=model_name,
@@ -839,7 +837,8 @@ def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str
             return res_json["design_name"], res_json["tool_taxonomy"]
         except Exception:
             continue
-    raise RuntimeError("Failed to discover tool schema via production models.")
+    raise RuntimeError("Failed to discover tool schema across all free models.")
+
 
 def execute_manuscript_evaluation(
     client: genai.Client,
@@ -850,11 +849,7 @@ def execute_manuscript_evaluation(
     strictness_mode: str = "Strict",
     classification_trace: Optional[dict] = None,
 ) -> dict:
-    active_tool_taxonomy = (
-        {assigned_design: active_tools_map[assigned_design]}
-        if (assigned_design and active_tools_map and assigned_design in active_tools_map)
-        else (active_tools_map or SEED_TAXONOMY)
-    )
+    active_tool_taxonomy = {assigned_design: active_tools_map[assigned_design]} if (assigned_design and active_tools_map and assigned_design in active_tools_map) else (active_tools_map or SEED_TAXONOMY)
     taxonomy_json = json.dumps(active_tool_taxonomy, indent=2)
 
     system_instruction = f"""
@@ -910,7 +905,6 @@ def execute_manuscript_evaluation(
     """
 
     clean_text = trim_manuscript_body(text_content) if text_content else ""
-
     contents = []
     if clean_text and len(clean_text.strip()) > 150:
         contents = [f"PAPER CONTENT:\n{clean_text}\n\nExecute appraisal and return JSON."]
@@ -922,17 +916,9 @@ def execute_manuscript_evaluation(
     else:
         raise ValueError("No valid manuscript text or PDF bytes supplied.")
 
-    # High-availability, production model cascade
-    candidate_models = [
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "gemini-2.5-flash",
-    ]
-
     last_exception = None
 
-    for model_name in candidate_models:
+    for model_name in FREE_ACTIVE_MODELS:
         for attempt in range(2):
             try:
                 response = client.models.generate_content(
@@ -944,37 +930,29 @@ def execute_manuscript_evaluation(
                         temperature=0.0,
                     ),
                 )
-                
-                # Strip markdown fences if present
                 raw_text = response.text.strip()
                 if raw_text.startswith("```"):
                     raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
                     raw_text = re.sub(r"\n```$", "", raw_text)
 
                 parsed = json.loads(raw_text)
-
                 if classification_trace:
                     if "audit_log" not in parsed:
                         parsed["audit_log"] = {}
                     parsed["audit_log"]["classification_trace"] = classification_trace
 
                 return parsed
-
             except Exception as e:
                 last_exception = e
                 err_str = str(e)
-                # If rate-limited or temporarily unavailable, pause and retry
                 if "429" in err_str or "503" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                     time.sleep(2.0)
                     continue
-                # If model is not found, break loop to next model candidate immediately
                 if "404" in err_str or "NOT_FOUND" in err_str:
                     break
-                # Other errors, brief pause
                 time.sleep(1.0)
 
-    # Raise the actual underlying error from the last model attempted
-    raise RuntimeError(f"Appraisal pipeline failed on all models. Last error: {str(last_exception)}")
+    raise RuntimeError(f"Appraisal pipeline failed on all free models. Details: {str(last_exception)}")
 
 
 def answer_interrogation_query(
@@ -996,12 +974,17 @@ def answer_interrogation_query(
     SOURCE TEXT:
     {raw_manuscript_text[:20000]}
     """
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=[f"HISTORY:\n{history_context}\n\nUSER QUESTION: {query}"],
-        config=types.GenerateContentConfig(system_instruction=chat_instruction, temperature=0.1)
-    )
-    return response.text
+    for model_name in FREE_ACTIVE_MODELS:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[f"HISTORY:\n{history_context}\n\nUSER QUESTION: {query}"],
+                config=types.GenerateContentConfig(system_instruction=chat_instruction, temperature=0.1)
+            )
+            return response.text
+        except Exception:
+            continue
+    return "Failed to query audit assistant across all active models."
 
 
 # ==========================================
@@ -1175,7 +1158,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Secure Passcode Resolution
 CORRECT_PASSCODE = st.secrets.get("APP_PASSCODE", os.environ.get("APP_PASSCODE", "324598"))
 
 if "authenticated" not in st.session_state:
@@ -1326,7 +1308,6 @@ if ensemble_data.get("evidence"):
         if ensemble_data.get("trace"):
             st.json(ensemble_data["trace"])
 
-# --- HARD-STOP CONTRADICTION GATING ---
 if contradiction_flag:
     st.error(f"🛑 **Critical Architecture Conflict Detected:**\n\n{contradiction_flag}\n\n*Appraisal halted to prevent scoring an empirical study with a review framework (or vice versa). Please manually correct the dropdown selection above.*")
     st.stop()
