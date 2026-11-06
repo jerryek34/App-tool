@@ -362,6 +362,75 @@ def extract_text_from_url(raw_input: str) -> str:
     return article.get_text(separator="\n", strip=True) if article else ""
 
 
+# ==========================================
+# 3. HARVARD CITATION & AUTHOR FORMATTER (MAX 3)
+# ==========================================
+def format_harvard_authors(raw_authors: str, max_authors: int = 3) -> str:
+    """Formats author names to concise Harvard style capping at max_authors."""
+    if not raw_authors or str(raw_authors).strip().lower() in ["not specified", "unspecified", "unknown", "n/a", "none"]:
+        return "Not Specified"
+
+    raw_clean = re.sub(r"\b(and|et al\.?|&)\b", ",", str(raw_authors), flags=re.IGNORECASE)
+    raw_segments = [seg.strip() for seg in raw_clean.split(",") if seg.strip()]
+
+    parsed_authors = []
+    for seg in raw_segments:
+        tokens = [t.strip(" .") for t in seg.split() if re.search(r"[a-zA-Z]", t)]
+        if not tokens:
+            continue
+        if len(tokens) == 1:
+            parsed_authors.append(tokens[0].title())
+        elif len(tokens[0]) <= 2 and len(tokens) > 1 and len(tokens[-1]) > 2:
+            # Format: Initial Surname -> "Surname, I."
+            surname = tokens[-1].title()
+            initials = "".join([f"{t[0].upper()}." for t in tokens[:-1]])
+            parsed_authors.append(f"{surname}, {initials}")
+        else:
+            # Format: GivenName Surname -> "Surname, G."
+            surname = tokens[-1].title()
+            initials = "".join([f"{t[0].upper()}." for t in tokens[:-1]])
+            parsed_authors.append(f"{surname}, {initials}")
+
+    if not parsed_authors:
+        return str(raw_authors).strip()
+
+    if len(parsed_authors) > max_authors:
+        return f"{', '.join(parsed_authors[:max_authors])} et al."
+    elif len(parsed_authors) == 1:
+        return parsed_authors[0]
+    elif len(parsed_authors) == 2:
+        return f"{parsed_authors[0]} and {parsed_authors[1]}"
+    else:
+        return f"{', '.join(parsed_authors[:-1])} and {parsed_authors[-1]}"
+
+
+def format_harvard_filename(data: dict, extension: str) -> str:
+    raw_authors = str(data.get("authors", "")).strip()
+    year = str(data.get("year_published", "")).strip()
+    tool = str(data.get("appraisal_tool_selected", "Tool")).strip()
+
+    year_match = re.search(r"\b(19\d\d|20\d\d)\b", year)
+    clean_year = year_match.group(1) if year_match else "UnknownYear"
+
+    if not raw_authors or raw_authors.lower() in ["not specified", "unspecified", "unknown", "n/a"]:
+        author_part = "AuthorUnknown"
+    else:
+        has_multiple = any(marker in raw_authors.lower() for marker in ["et al", " and ", "&", ","])
+        first_segment = re.split(r"[,;&]|\sand\s|\set\sal", raw_authors, flags=re.IGNORECASE)[0].strip()
+        tokens = [t for t in re.split(r"\s+", first_segment) if re.search(r"[a-zA-Z]", t)]
+        surname = tokens[-1] if (len(tokens) > 1 and len(tokens[0]) <= 2) else (tokens[0] if tokens else "Author")
+        surname = re.sub(r"[^a-zA-Z0-9]", "", surname)
+        author_part = f"{surname}_et_al" if has_multiple else surname
+
+    clean_tool = re.sub(r"[^a-zA-Z0-9_-]", "_", tool)
+    clean_author = re.sub(r"[^a-zA-Z0-9_-]", "_", author_part)
+    clean_filename = f"{clean_author}_{clean_year}_{clean_tool}_KAT.{extension.lstrip('.')}"
+    return re.sub(r"_+", "_", clean_filename)
+
+
+# ==========================================
+# 4. 4-SOURCE RANKED ENSEMBLE CLASSIFIER
+# ==========================================
 def extract_declared_design_ranked(text: str) -> Optional[Tuple[str, str, int]]:
     head = text[:6000].lower()
 
@@ -765,30 +834,6 @@ def run_comprehensive_checksum(
     return data, grounded_score, grounding_warnings, flaw_warnings
 
 
-def format_harvard_filename(data: dict, extension: str) -> str:
-    raw_authors = str(data.get("authors", "")).strip()
-    year = str(data.get("year_published", "")).strip()
-    tool = str(data.get("appraisal_tool_selected", "Tool")).strip()
-
-    year_match = re.search(r"\b(19\d\d|20\d\d)\b", year)
-    clean_year = year_match.group(1) if year_match else "UnknownYear"
-
-    if not raw_authors or raw_authors.lower() in ["not specified", "unspecified", "unknown"]:
-        author_part = "AuthorUnknown"
-    else:
-        has_multiple = any(marker in raw_authors.lower() for marker in ["et al", " and ", "&", ","])
-        first_segment = re.split(r"[,;&]|\sand\s|\set\sal", raw_authors, flags=re.IGNORECASE)[0].strip()
-        tokens = [t for t in re.split(r"\s+", first_segment) if re.search(r"[a-zA-Z]", t)]
-        surname = tokens[-1] if (len(tokens) > 1 and len(tokens[0]) <= 2) else (tokens[0] if tokens else "Author")
-        surname = re.sub(r"[^a-zA-Z0-9]", "", surname)
-        author_part = f"{surname}_et_al" if has_multiple else surname
-
-    clean_tool = re.sub(r"[^a-zA-Z0-9_-]", "_", tool)
-    clean_author = re.sub(r"[^a-zA-Z0-9_-]", "_", author_part)
-    clean_filename = f"{clean_author}_{clean_year}_{clean_tool}_KAT.{extension.lstrip('.')}"
-    return re.sub(r"_+", "_", clean_filename)
-
-
 def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str, dict]:
     discovery_instruction = """
     Examine research text and return JSON:
@@ -849,6 +894,9 @@ def execute_manuscript_evaluation(
     - Total: 0 to 9 Stars
     - Quality: Good (7-9), Fair (4-6), Poor (0-3).
 
+    AUTHORS CITATION FORMAT:
+    Extract up to 3 primary authors in Harvard format (e.g. 'Smith, J., Doe, A. and Brown, C.' or 'Smith, J. et al.' if >3).
+
     STORY-LIKE NARRATIVE ARC SUMMARY (4 TO 10 BULLETS REQUIRED):
     Provide a compelling, chronological story-like summary of the entire paper and its post-grading appraisal:
     1. Act I (The Clinical Dilemma & Spark): What unresolved problem or uncertainty prompted this inquiry?
@@ -860,7 +908,7 @@ def execute_manuscript_evaluation(
     CRITICAL: Output ONLY a valid JSON object matching:
     {{
       "paper_title": "Identified full title",
-      "authors": "Author list",
+      "authors": "Up to 3 authors in Harvard format",
       "journal": "Journal Name",
       "year_published": "YYYY",
       "doi": "DOI or URL",
@@ -937,6 +985,11 @@ def execute_manuscript_evaluation(
                     raw_text = re.sub(r"\n```$", "", raw_text)
 
                 parsed = json.loads(raw_text)
+                
+                # Standardize authors to Harvard format (<=3 authors)
+                if "authors" in parsed:
+                    parsed["authors"] = format_harvard_authors(parsed["authors"], max_authors=3)
+
                 if classification_trace:
                     if "audit_log" not in parsed:
                         parsed["audit_log"] = {}
@@ -1000,11 +1053,13 @@ def build_docx_report(data: dict) -> io.BytesIO:
     run_t.font.color.rgb = RGBColor(120, 187, 166)
 
     ratings = data.get("ratings_summary", {})
+    harvard_authors = format_harvard_authors(data.get("authors", "Not Specified"), max_authors=3)
+
     meta_table = doc.add_table(rows=8, cols=2)
     meta_table.style = "Table Grid"
     fields = [
         ("Evaluated Title:", data.get("paper_title", "N/A")),
-        ("Authors:", data.get("authors", "Not Specified")),
+        ("Authors (Harvard):", harvard_authors),
         ("Journal & Year:", f"{data.get('journal', 'N/A')} ({data.get('year_published', 'N/A')})"),
         ("DOI / Reference:", data.get("doi", "N/A")),
         ("Study Architecture:", data.get("study_design", "N/A")),
@@ -1021,7 +1076,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
 
     doc.add_paragraph("")
 
-    # Practical Takeaways
     takeaways = data.get("practical_takeaways", [])
     if takeaways:
         doc.add_heading("Practical Takeaways from the Paper (At-A-Glance)", level=2)
@@ -1030,7 +1084,6 @@ def build_docx_report(data: dict) -> io.BytesIO:
             p_t.add_run(f"Takeaway #{idx}: ").bold = True
             p_t.add_run(pt)
 
-    # Narrative Arc Summary
     story_arc = data.get("narrative_arc_summary", [])
     if story_arc:
         doc.add_heading("Narrative Story Arc & Post-Grading Appraisal Journey", level=2)
@@ -1153,9 +1206,11 @@ def build_pdf_report(data: dict) -> io.BytesIO:
         else:
             active_tier = "YELLOW"
 
+    harvard_authors = format_harvard_authors(data.get("authors", "Not Specified"), max_authors=3)
+
     meta_data = [
         [Paragraph("Evaluated Title:", bold_style), Paragraph(data.get("paper_title", "N/A"), body_style)],
-        [Paragraph("Authors:", bold_style), Paragraph(data.get("authors", "Not Specified"), body_style)],
+        [Paragraph("Authors (Harvard):", bold_style), Paragraph(harvard_authors, body_style)],
         [Paragraph("Journal & Year:", bold_style), Paragraph(f"{data.get('journal', 'N/A')} ({data.get('year_published', 'N/A')})", body_style)],
         [Paragraph("Study Architecture:", bold_style), Paragraph(data.get("study_design", "N/A"), body_style)],
         [Paragraph("Tool Applied:", bold_style), Paragraph(data.get("appraisal_tool_selected", "N/A"), body_style)],
@@ -1580,6 +1635,9 @@ if "appraisal_data" in st.session_state:
     st.subheader(f"📋 {data.get('paper_title', 'Untitled')}")
 
     ratings = data.get("ratings_summary", {})
+    harvard_display_authors = format_harvard_authors(data.get("authors", "Not Specified"), max_authors=3)
+    st.markdown(f"**Authors (Harvard):** {harvard_display_authors}")
+
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.metric("Architecture", data.get("study_design"))
@@ -1594,14 +1652,12 @@ if "appraisal_data" in st.session_state:
     if nos_stars and "total_stars" in nos_stars and nos_stars["total_stars"] > 0:
         st.info(f"⭐ **Newcastle-Ottawa Scale Star Count:** {nos_stars.get('total_stars', 0)}/9 Stars (Selection: {nos_stars.get('selection_stars', 0)}★ | Comparability: {nos_stars.get('comparability_stars', 0)}★ | Outcome: {nos_stars.get('outcome_stars', 0)}★)")
 
-    # Practical Takeaways
     takeaways = data.get("practical_takeaways", [])
     if takeaways:
         st.markdown("### 💡 Practical Takeaways from the Paper (At-A-Glance)")
         for idx, item in enumerate(takeaways, 1):
             st.markdown(f"**{idx}.** {item}")
 
-    # Narrative Story Arc Summary
     story_arc = data.get("narrative_arc_summary", [])
     if story_arc:
         st.markdown("### 📖 Narrative Story Arc & Translational Journey")
@@ -1668,6 +1724,7 @@ if "appraisal_data" in st.session_state:
         audit_payload = json.dumps(
             {
                 "paper_title": data.get("paper_title"),
+                "authors_harvard": harvard_display_authors,
                 "study_design": data.get("study_design"),
                 "appraisal_tool_selected": data.get("appraisal_tool_selected"),
                 "ratings_summary": data.get("ratings_summary", {}),
