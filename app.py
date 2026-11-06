@@ -943,60 +943,79 @@ def execute_manuscript_evaluation(
 def generate_forensic_deep_dive(
     client: genai.Client,
     base_data: dict,
-    full_text: str
+    full_text: str = ""  # Kept for backward compatibility, but no longer re-passed in bulk
 ) -> dict:
-    tool_name = base_data.get("appraisal_tool_selected", "Assigned Tool")
-    design = base_data.get("study_design", "Assigned Design")
+    """
+    High-speed forensic deep dive.
+    Locks the tool and awarded ratings from base_data so the architecture CANNOT change.
+    Evaluates in seconds by analyzing pre-extracted domain ratings rather than re-reading 35k chars.
+    """
+    locked_tool = base_data.get("appraisal_tool_selected", "Assigned Tool")
+    locked_design = base_data.get("study_design", "Assigned Design")
+    base_domains = base_data.get("domain_appraisals", [])
+    overall_verdict = base_data.get("overall_verdict", "")
+    nos_stars = base_data.get("nos_score_breakdown", {})
+
+    # Strip raw text payload down to just title + methodology neighborhood to save tokens and latency
+    short_context = full_text[:4000] if full_text else ""
 
     deep_prompt = f"""
-    You are a forensic academic peer-reviewer and clinical trial statistician auditing this paper:
-    Title: {base_data.get('paper_title')}
-    Tool: {tool_name} ({design})
+    You are an expert clinical trial auditor and biostatistician.
+    
+    IMMUTABLE CONSTRAINTS:
+    - YOU MUST USE THE EXACT APPRAISAL TOOL ALREADY ASSIGNED: "{locked_tool}" ({locked_design}).
+    - DO NOT re-classify or change this study design.
+    - Base Verdict Already Awarded: {overall_verdict}
+    - Existing Domain Scores & Quotes:
+    {json.dumps(base_domains, indent=1)}
+    
+    BASE NOS BREAKDOWN (if applicable):
+    {json.dumps(nos_stars)}
 
-    MANUSCRIPT TEXT:
-    {full_text[:35000]}
+    CONTEXT EXCERPT:
+    {short_context}
 
-    STRICT FORENSIC REQUIREMENTS:
+    YOUR SPECIFIC TASKS:
     1. EXPLICIT ARITHMETIC SHOWN:
-       - If Newcastle-Ottawa Scale (NOS): Show exact star count math (Selection: X/4 + Comparability: Y/2 + Outcome: Z/3 = Total Stars / 9) and calculate the percentage.
-       - If AGREE II: Calculate explicit standardized score formula: (Obtained score - Minimum possible) / (Maximum possible - Minimum possible) × 100%.
-       - If Cochrane RoB 2 / AMSTAR 2 / ROBINS-I / QUADAS-2: Calculate exact ratio of Low vs Some Concerns vs High Risk domains, count critical domain violations, and demonstrate why the overall rating was mathematically triggered.
-    2. ZERO RISK-OF-BIAS BOILERPLATE:
-       - DO NOT state generic definitions like 'Blinding is important because it prevents observer bias' or 'Randomization ensures balance'.
-       - Jump straight to empirical manuscript facts: exact participant counts, lost-to-follow-up numbers, missing variables, p-values, or diagnostic cutoff choices.
+       - Show the EXACT math for "{locked_tool}".
+       - For Newcastle-Ottawa Scale (NOS): Show Selection (X/4) + Comparability (Y/2) + Outcome (Z/3) = Total Stars / 9 and the exact percentage.
+       - For AMSTAR 2 / Cochrane RoB 2 / ROBINS-I / QUADAS-2: Calculate the exact proportion of Low vs Some Concerns vs High Risk domains, tally critical flaws, and show the arithmetic rule that determined "{overall_verdict}".
+       - For AGREE II: Show the standardized % calculation: (Obtained - Min) / (Max - Min) * 100.
+    2. ZERO BOILERPLATE:
+       - No textbook filler (e.g. do NOT say 'blinding is important because it prevents bias'). Jump directly to empirical facts from the paper.
     3. AT LEAST 2 TO 3 SUBSTANTIVE CONTENT CRITICISMS:
-       - Deep, rigorous critique of the research logic itself (e.g., immortal time bias, confounding by indication, survivorship bias, underpowered subgroup comparisons, inappropriate surrogate endpoints, or unmeasured confounding variables).
+       - Detail deep, specific methodological or statistical vulnerabilities (e.g., confounding by indication, immortal time bias, survivorship bias, underpowered sample, missing confounder adjustment).
 
-    CRITICAL: Output ONLY a JSON object:
+    Output ONLY a valid JSON object matching this schema:
     {{
       "arithmetic_breakdown": {{
-        "formula_used": "The mathematical equation or grading rule",
+        "formula_used": "Exact equation or threshold rule for {locked_tool}",
         "step_by_step_calculation": "Step-by-step arithmetic showing how the score was calculated",
-        "final_tally": "Final numerical score or percentage"
+        "final_tally": "Numerical score, star ratio, or percentage"
       }},
       "substantive_criticisms": [
         {{
-          "flaw_title": "Name of Methodological Deficit 1",
-          "manuscript_evidence": "Line numbers, sample counts, or exact quote",
-          "epidemiological_impact": "Direct scientific impact on internal validity"
+          "flaw_title": "Deficit Name 1",
+          "manuscript_evidence": "Exact numbers, sample counts, or paper facts",
+          "epidemiological_impact": "Direct scientific impact on validity"
         }},
         {{
-          "flaw_title": "Name of Methodological Deficit 2",
-          "manuscript_evidence": "Line numbers, sample counts, or exact quote",
-          "epidemiological_impact": "Direct scientific impact on internal validity"
+          "flaw_title": "Deficit Name 2",
+          "manuscript_evidence": "Exact numbers, sample counts, or paper facts",
+          "epidemiological_impact": "Direct scientific impact on validity"
         }},
         {{
-          "flaw_title": "Name of Methodological Deficit 3",
-          "manuscript_evidence": "Line numbers, sample counts, or exact quote",
-          "epidemiological_impact": "Direct scientific impact on internal validity"
+          "flaw_title": "Deficit Name 3",
+          "manuscript_evidence": "Exact numbers, sample counts, or paper facts",
+          "epidemiological_impact": "Direct scientific impact on validity"
         }}
       ],
       "domain_deep_dives": [
         {{
-          "domain_name": "Domain name",
-          "score_awarded": "Grade or Star",
-          "direct_empirical_finding": "Pure manuscript fact without boilerplate",
-          "statistical_or_design_flaw": "Specific vulnerability identified"
+          "domain_name": "Domain Title from base appraisal",
+          "score_awarded": "Same score from base appraisal",
+          "direct_empirical_finding": "Empirical observation from the paper without boilerplate",
+          "statistical_or_design_flaw": "Vulnerability identified"
         }}
       ]
     }}
