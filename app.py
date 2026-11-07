@@ -69,10 +69,10 @@ SEED_TAXONOMY = {
         ],
         "scale": "High Confidence | Moderate Confidence | Low Confidence | Critically Low Confidence.",
         "scoring_guide": (
-            "• High Confidence: No or one non-critical weakness; provides an accurate, comprehensive synthesis of available studies.\n"
-            "• Moderate Confidence: More than one non-critical weakness, but no critical flaws; summary remains accurate.\n"
-            "• Low Confidence: One critical flaw (with or without non-critical weaknesses); review may not provide an accurate summary.\n"
-            "• Critically Low Confidence: More than one critical flaw; review should not be relied on for clinical decisions."
+            "• High Confidence: No or one non-critical weakness; provides an accurate, comprehensive summary of the evidence.\n"
+            "• Moderate Confidence: More than one non-critical weakness, but zero critical domain flaws.\n"
+            "• Low Confidence: Exactly one critical domain flaw (with or without non-critical weaknesses); findings may not be dependable.\n"
+            "• Critically Low Confidence: More than one critical flaw; review should not be relied upon for clinical practice decisions."
         )
     },
     "Narrative Review": {
@@ -89,10 +89,10 @@ SEED_TAXONOMY = {
         ],
         "scale": "0 = Not Met | 1 = Partially Met | 2 = Met. Total score out of 12 (>=9 required for high quality).",
         "scoring_guide": (
-            "• 6 items scored 0, 1, or 2 (Max: 12 points).\n"
-            "• High Quality: 9 to 12 points (robust reasoning, well-referenced, balanced).\n"
-            "• Moderate Quality: 6 to 8 points (some omissions in search methods or balance).\n"
-            "• Low Quality: 0 to 5 points (insufficient literature reporting or high risk of advocacy bias)."
+            "• 6 items scored on a 3-point scale: 0 (not met), 1 (partially met), or 2 (met), yielding a maximum of 12 points.\n"
+            "• High Quality: 9 to 12 points (indicates strong literature referencing, scientific balance, and explicit search reporting).\n"
+            "• Moderate Quality: 6 to 8 points (adequate presentation but noticeable gaps in search transparency or data synthesis).\n"
+            "• Low Quality: 0 to 5 points (insufficient literature substantiation or substantial risk of advocacy/narrative bias)."
         )
     },
     "Clinical Practice Guideline / Consensus Statement": {
@@ -109,10 +109,10 @@ SEED_TAXONOMY = {
         ],
         "scale": "1 (Strongly Disagree) to 7 (Strongly Agree). Standardized % >= 70% required for high quality.",
         "scoring_guide": (
-            "• Scored 1 to 7 per item. Scaled domain score = (Obtained - Min) / (Max - Min) × 100%.\n"
-            "• Strongly Recommended: Domain 3 (Rigour) >= 70% and most domains >= 70%.\n"
+            "• Items scored 1 to 7. Scaled domain score = (Obtained Score - Minimum Possible) / (Maximum Possible - Minimum Possible) × 100%.\n"
+            "• Strongly Recommended: Domain 3 (Rigour of Development) >= 70% and most remaining domains >= 70%.\n"
             "• Recommended with Modifications: Most domains score between 50% and 69%.\n"
-            "• Not Recommended: Domain 3 < 50%, reflecting substandard development methods."
+            "• Not Recommended: Domain 3 (Rigour) < 50%, reflecting substandard development procedures."
         )
     },
     "Randomized Controlled Trial (RCT)": {
@@ -128,9 +128,9 @@ SEED_TAXONOMY = {
         ],
         "scale": "Low Risk | Some Concerns | High Risk. A single High Risk domain mandates an overall High Risk rating.",
         "scoring_guide": (
-            "• Low Risk of Bias: Study judged at low risk across all 5 key domains.\n"
-            "• Some Concerns: Some concerns in at least one domain, but no domain at high risk.\n"
-            "• High Risk of Bias: High risk in at least one domain, or 'some concerns' across multiple domains."
+            "• Low Risk of Bias: Study is judged at low risk across all 5 key trial domains.\n"
+            "• Some Concerns: Study has some concerns in at least one domain, but no domain is judged at high risk.\n"
+            "• High Risk of Bias: Judged at high risk in at least one domain, or multiple domains with 'some concerns' that substantially reduce confidence."
         )
     },
     "Non-Randomized Intervention / Quasi-Experimental": {
@@ -148,10 +148,10 @@ SEED_TAXONOMY = {
         ],
         "scale": "Low Risk | Moderate Risk | Serious Risk | Critical Risk | No Information.",
         "scoring_guide": (
-            "• Low Risk: Comparable to a well-conducted randomized trial.\n"
-            "• Moderate: Sound for non-randomized study; some residual confounding possible.\n"
-            "• Serious: Important confounding, selective deviations, or non-blinded assessors.\n"
-            "• Critical: Flaws render the evidence clinically uninformative."
+            "• Low Risk: Comparable to a well-conducted randomized controlled trial.\n"
+            "• Moderate Risk: Sound methodology for a non-randomized study; some residual confounding is likely.\n"
+            "• Serious Risk: Important confounding, unbalanced co-interventions, or unblinded assessment present; interpret with caution.\n"
+            "• Critical Risk: Flaws are so severe that the study provides no dependable evidence."
         )
     },
     "Observational Study (Cohort)": {
@@ -165,10 +165,10 @@ SEED_TAXONOMY = {
         ],
         "scale": "Stars Awarded (0-9 Total): Good Quality (7-9 Stars) | Fair Quality (4-6 Stars) | Poor Quality (0-3 Stars).",
         "scoring_guide": (
-            "• Selection (Max 4 ★): Representativeness, control cohort, exposure ascertainment, absence of outcome at baseline.\n"
-            "• Comparability (Max 2 ★): 1 ★ for controlling primary confounder (e.g., age/sex), 1 ★ for secondary critical covariates.\n"
-            "• Outcome (Max 3 ★): 1 ★ for blinded/record outcome, 1 ★ for adequate duration, 1 ★ for follow-up retention > 80%.\n"
-            "• Quality Tiers: 7-9 Stars = Good Quality; 4-6 Stars = Fair Quality; 0-3 Stars = Poor Quality."
+            "• Selection (Max 4 ★): Evaluates exposed representativeness, non-exposed selection, exposure verification, and absence of outcome at baseline.\n"
+            "• Comparability (Max 2 ★): 1 ★ for controlling primary confounder (e.g. age/sex), 1 ★ for controlling secondary critical confounders.\n"
+            "• Outcome (Max 3 ★): 1 ★ for blinded/record outcome assessment, 1 ★ for sufficient duration, 1 ★ for follow-up retention > 80%.\n"
+            "• Thresholds: 7–9 Stars = Good Quality; 4–6 Stars = Fair Quality; 0–3 Stars = Poor Quality."
         )
     },
     "Observational Study (Case-Control)": {
@@ -182,10 +182,10 @@ SEED_TAXONOMY = {
         ],
         "scale": "Stars Awarded (0-9 Total): Good Quality (7-9 Stars) | Fair Quality (4-6 Stars) | Poor Quality (0-3 Stars).",
         "scoring_guide": (
-            "• Selection (Max 4 ★): Case definition, representativeness, control selection, and no history of endpoint.\n"
-            "• Comparability (Max 2 ★): Matching/multivariable adjustment for primary and additional covariates.\n"
-            "• Exposure (Max 3 ★): Blinded ascertainment, same structured interview, and identical response rates.\n"
-            "• Quality Tiers: 7-9 Stars = Good Quality; 4-6 Stars = Fair Quality; 0-3 Stars = Poor Quality."
+            "• Selection (Max 4 ★): Independent case validation, representativeness, control selection, and no history of endpoint.\n"
+            "• Comparability (Max 2 ★): Matching or multivariable adjustment for primary and additional covariates.\n"
+            "• Exposure (Max 3 ★): Blinded exposure ascertainment, identical interview method, and comparable non-response rates.\n"
+            "• Thresholds: 7–9 Stars = Good Quality; 4–6 Stars = Fair Quality; 0–3 Stars = Poor Quality."
         )
     },
     "Cross-Sectional Study": {
@@ -201,9 +201,9 @@ SEED_TAXONOMY = {
         ],
         "scale": "Yes | No | Don't Know across 20 structured criteria. High Quality (>=15 Yes) | Moderate Quality (10-14 Yes) | Low Quality (<10 Yes).",
         "scoring_guide": (
-            "• 20 individual cross-sectional criteria (Scored Yes / No / Don't Know).\n"
+            "• 20 individual cross-sectional criteria scored as Yes, No, or Don't Know.\n"
             "• High Quality (>=15 Yes): Low risk of sampling, non-response, or reporting bias.\n"
-            "• Moderate Quality (10-14 Yes): Acceptable reporting, but non-response or confounding concerns exist.\n"
+            "• Moderate Quality (10–14 Yes): Acceptable reporting, but non-response or confounding concerns exist.\n"
             "• Low Quality (<10 Yes): Substantial vulnerability to sampling bias or unvalidated survey instruments."
         )
     },
@@ -256,7 +256,7 @@ SEED_TAXONOMY = {
         "scoring_guide": (
             "• Assesses 10 key qualitative validity questions.\n"
             "• High Quality: Research reflexivity, thematic saturation, and verbatim quotes fully demonstrated.\n"
-            "• Moderate/Low: Inadequate description of data analysis or omission of researcher positionality."
+            "• Moderate/Low Quality: Inadequate description of data analysis or omission of researcher positionality."
         )
     },
 }
@@ -811,11 +811,11 @@ def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str
 
 
 def extract_explicit_score_from_data(data: dict) -> str:
-    """Consistently extracts or calculates the tool's definitive numerical or scale score."""
+    """Extracts or derives the tool's definitive numerical or scale score consistently."""
     tool_name = str(data.get("appraisal_tool_selected", "")).upper()
     verdict = str(data.get("overall_verdict", "N/A"))
 
-    # 1. Check specialized NOS star breakdown
+    # 1. Specialized NOS star breakdown
     nos_stars = data.get("nos_score_breakdown")
     if isinstance(nos_stars, dict) and nos_stars.get("total_stars") is not None and nos_stars.get("total_stars", 0) > 0:
         sel = nos_stars.get("selection_stars", 0)
@@ -824,7 +824,7 @@ def extract_explicit_score_from_data(data: dict) -> str:
         tot = nos_stars.get("total_stars", 0)
         return f"{tot}/9 Stars (Selection: {sel}★ | Comparability: {comp}★ | Outcome: {out}★) — {verdict}"
 
-    # 2. Check for explicit arithmetic in deep_dive if present
+    # 2. Check for explicit arithmetic in deep_dive
     arith = data.get("arithmetic_breakdown")
     if isinstance(arith, dict) and arith.get("final_tally"):
         return f"{arith.get('final_tally')} — {verdict}"
@@ -840,7 +840,6 @@ def extract_explicit_score_from_data(data: dict) -> str:
         if "AMSTAR" in tool_name or "ROB" in tool_name or "QUADAS" in tool_name:
             return f"Low: {low_count} | Concerns: {some_concerns} | High/Crit: {high_count} (of {len(domains)} Domains) — {verdict}"
         elif "SANRA" in tool_name:
-            # SANRA 0, 1, 2 points
             pts = 0
             for r in ratings:
                 if "2" in r or "met" in r:
@@ -851,6 +850,31 @@ def extract_explicit_score_from_data(data: dict) -> str:
                 return f"{pts}/12 Points — {verdict}"
 
     return verdict
+
+
+def resolve_tool_scoring_guide(data: dict) -> Tuple[str, str, str, str, str]:
+    """Helper to ensure scoring criteria, rules, and tool names are fully populated from taxonomy."""
+    tool_meta = data.get("tool_meta") or {}
+    acronym = tool_meta.get("acronym") or data.get("appraisal_tool_selected", "Tool")
+    full_name = tool_meta.get("full_name") or "Standard Critical Appraisal Instrument"
+    purpose = tool_meta.get("purpose") or "Standardized epidemiological instrument used to assess study rigour and bias."
+    scoring_rules = tool_meta.get("scoring_rules") or "Standard qualitative rating or numerical score threshold."
+    scoring_guide = tool_meta.get("scoring_guide") or ""
+
+    raw_design = str(data.get("study_design", "")).lower()
+    for design_key, tool_info in SEED_TAXONOMY.items():
+        if design_key.lower() in raw_design or raw_design in design_key.lower():
+            if not full_name or full_name == "Standard Critical Appraisal Instrument":
+                full_name = tool_info.get("full_name", full_name)
+            if not purpose or "Standardized epidemiological" in purpose:
+                purpose = tool_info.get("purpose", purpose)
+            if not scoring_rules or "Standard qualitative" in scoring_rules:
+                scoring_rules = tool_info.get("scale", scoring_rules)
+            if not scoring_guide:
+                scoring_guide = tool_info.get("scoring_guide", "")
+            break
+
+    return acronym, full_name, purpose, scoring_rules, scoring_guide
 
 
 def execute_manuscript_evaluation(
@@ -1011,6 +1035,7 @@ def generate_forensic_deep_dive(
     base_domains = base_data.get("domain_appraisals", [])
     overall_verdict = base_data.get("overall_verdict", "")
     nos_stars = base_data.get("nos_score_breakdown", {})
+    audit_trail = base_data.get("audit_log", {})
 
     short_context = full_text[:8000] if full_text else ""
 
@@ -1025,6 +1050,8 @@ def generate_forensic_deep_dive(
     {json.dumps(base_domains, indent=1)}
     - Base NOS Star Breakdown (if applicable):
     {json.dumps(nos_stars)}
+    - Classification Pathway & Ensemble Audit:
+    {json.dumps(audit_trail, indent=1)}
 
     MANUSCRIPT CONTEXT EXCERPT:
     {short_context}
@@ -1033,7 +1060,9 @@ def generate_forensic_deep_dive(
     1. TOOL SELECTION RATIONALE & COMPARATIVE JUSTIFICATION:
        - Explain with formal academic reasoning why "{locked_tool}" was methodologically mandated for this manuscript architecture ({locked_design}).
        - Contrast it against competing frameworks (e.g. why AMSTAR 2 instead of SANRA; why NOS Cohort instead of cross-sectional AXIS or randomized RoB 2; or why ROBINS-I was necessary).
-    2. EXPLICIT STEP-BY-STEP MATHEMATICAL ARITHMETIC:
+       - Explicitly state the algorithm/criteria that rejected the competing tools.
+    2. EXPLICIT STEP-BY-STEP MATHEMATICAL ARITHMETIC & SCORING SYSTEM BREAKDOWN:
+       - Detail exactly how the scoring system works for "{locked_tool}".
        - Show the exact arithmetic derivation leading to the score and verdict.
        - If Newcastle-Ottawa Scale: Detail Selection (X/4) + Comparability (Y/2) + Outcome (Z/3) = Total Stars / 9, plus scaled percentage.
        - If Cochrane RoB 2 / AMSTAR 2 / ROBINS-I / QUADAS-2: Calculate the exact proportion of Low Risk vs High Risk vs Some Concerns, count critical domain violations, and demonstrate the decision gate threshold.
@@ -1052,7 +1081,11 @@ def generate_forensic_deep_dive(
         "assigned_tool": "{locked_tool}",
         "architecture_classification": "{locked_design}",
         "selection_justification": "Detailed academic rationale explaining why this tool is gold-standard for this design.",
-        "competing_tools_rejected": "Comparison against other instruments and why they were inappropriate for this inquiry."
+        "competing_tools_rejected": "Comparison against other instruments and algorithmic rules why they were rejected."
+      }},
+      "scoring_system_breakdown": {{
+        "how_scores_are_awarded": "Step-by-step description of how points/grades are assigned under {locked_tool}.",
+        "quality_thresholds": "What specific scores indicate High, Moderate, or Poor quality under this instrument."
       }},
       "arithmetic_breakdown": {{
         "formula_used": "Exact mathematical equation or grading rule",
@@ -1123,6 +1156,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
     ratings = data.get("ratings_summary", {})
     harvard_authors = format_harvard_authors(data.get("authors", "Not Specified"), max_authors=3)
     explicit_score = extract_explicit_score_from_data(data)
+    acronym, full_name, purpose, scoring_rules, scoring_guide = resolve_tool_scoring_guide(data)
 
     meta_table = doc.add_table(rows=8, cols=2)
     meta_table.style = "Table Grid"
@@ -1131,7 +1165,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
         ("Authors (Harvard):", harvard_authors),
         ("Journal & Year:", f"{data.get('journal', 'N/A')} ({data.get('year_published', 'N/A')})"),
         ("Study Architecture:", data.get("study_design", "N/A")),
-        ("Tool Applied:", data.get("appraisal_tool_selected", "N/A")),
+        ("Tool Applied:", f"{full_name} ({acronym})"),
         ("Quality Score / Star Tally:", explicit_score),
         ("Methodology / Reporting / Certainty:", f"{ratings.get('methodology_quality', 'N/A')} / {ratings.get('reporting_quality', 'N/A')} / {ratings.get('certainty_score', 'N/A')}"),
         ("Evidence Groundedness:", f"{data.get('groundedness_score', 100.0)}%"),
@@ -1166,7 +1200,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
                 p_s.add_run(pt)
 
     doc.add_paragraph("")
-    doc.add_heading(f"1. Detailed Domain Appraisal ({data.get('appraisal_tool_selected', 'Tool')})", level=1)
+    doc.add_heading(f"1. Detailed Domain Appraisal ({acronym})", level=1)
     table = doc.add_table(rows=1, cols=4)
     table.style = "Table Grid"
     for i, h in enumerate(["Domain & Question", "Score", "Evidence", "Critique"]):
@@ -1198,6 +1232,15 @@ def build_docx_report(data: dict) -> io.BytesIO:
                 p_synth.add_run(pt)
     else:
         doc.add_paragraph(str(synth))
+
+    doc.add_paragraph("")
+    doc.add_heading("3. Scoring System & Grading Criteria Explanation", level=1)
+    doc.add_paragraph(f"Instrument Applied: {full_name} ({acronym})")
+    doc.add_paragraph(f"Scored Verdict / Result: {explicit_score}")
+    doc.add_paragraph("How Scores Are Awarded & Interpreted:")
+    for line in scoring_guide.split("\n"):
+        if line.strip():
+            doc.add_paragraph(line.strip(), style='List Bullet')
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -1248,6 +1291,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
 
     harvard_authors = format_harvard_authors(data.get("authors", "Not Specified"), max_authors=3)
     explicit_score = extract_explicit_score_from_data(data)
+    acronym, full_name, purpose, scoring_rules, scoring_guide = resolve_tool_scoring_guide(data)
 
     # 1. Compact Header Metadata Bar (Green-Themed)
     meta_data = [
@@ -1256,7 +1300,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
             Paragraph(f"<b>Authors:</b> {harvard_authors} ({data.get('year_published', 'N/A')})", body_style),
         ],
         [
-            Paragraph(f"<b>Design:</b> {data.get('study_design', 'N/A')} | <b>Tool:</b> {data.get('appraisal_tool_selected', 'N/A')}", body_style),
+            Paragraph(f"<b>Design:</b> {data.get('study_design', 'N/A')} | <b>Tool:</b> {acronym}", body_style),
             Paragraph(f"<b>Tool Score / Tally:</b> <font color='#1D3B32'><b>{explicit_score}</b></font>", body_style),
         ],
         [
@@ -1330,7 +1374,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(Spacer(1, 8))
 
     # 4. Domain-by-Domain Evaluation Table (Green Accents)
-    story.append(Paragraph(f"<b>Domain-by-Domain Evaluation & Core Questions ({data.get('appraisal_tool_selected', 'Tool')})</b>", sec_heading))
+    story.append(Paragraph(f"<b>Domain-by-Domain Evaluation & Core Questions ({acronym})</b>", sec_heading))
     domain_data = [[Paragraph("Domain & Specific Question", header_style), Paragraph("Score", header_style), Paragraph("Plain-English Assessment & Grounded Evidence", header_style)]]
     for d in data.get("domain_appraisals", []):
         r_str = str(d.get("rating", ""))
@@ -1362,20 +1406,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_domains)
     story.append(Spacer(1, 8))
 
-    tool_meta = data.get("tool_meta", {})
-    acronym = tool_meta.get("acronym") or data.get("appraisal_tool_selected", "Tool")
-    full_name = tool_meta.get("full_name") or "Standard Critical Appraisal Instrument"
-    purpose = tool_meta.get("purpose") or "Standardized epidemiological instrument used to assess study rigour and bias."
-    scoring_rules = tool_meta.get("scoring_rules") or "Standard qualitative rating or numerical score threshold."
-    scoring_guide = tool_meta.get("scoring_guide") or ""
-
-    design_match = SEED_TAXONOMY.get(data.get("study_design", ""))
-    if design_match:
-        full_name = design_match.get("full_name", full_name)
-        purpose = design_match.get("purpose", purpose)
-        scoring_rules = design_match.get("scale", scoring_rules)
-        scoring_guide = design_match.get("scoring_guide", scoring_guide)
-
+    # 5. Guaranteed Tool Grading & Scoring Criteria Explanation (Green-Themed)
     story.append(Paragraph("<b>Appraisal Framework & Grading System Explanation</b>", sec_heading))
     guide_paragraphs = []
     if scoring_guide:
@@ -1389,7 +1420,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     appendix_rows = [
         [Paragraph("Tool Applied:", bold_style), Paragraph(f"<b>{full_name} ({acronym})</b>", body_style)],
         [Paragraph("Clinical Purpose:", bold_style), Paragraph(purpose, body_style)],
-        [Paragraph("Scored Result:", bold_style), Paragraph(f"<b>{explicit_score}</b>", bold_style)],
+        [Paragraph("Scored Result:", bold_style), Paragraph(f"<font color='#1D3B32'><b>{explicit_score}</b></font>", bold_style)],
         [Paragraph("How Grading Works:", bold_style), guide_paragraphs],
         [Paragraph("How to Interpret:", bold_style), Paragraph("High scores or 'Low Risk' ratings confirm the study methodology is sound. Lower scores highlight vulnerabilities that necessitate caution before changing clinical practice.", body_style)],
     ]
@@ -1449,11 +1480,12 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     explicit_score = extract_explicit_score_from_data(base_data)
     arith = deep_dive.get("arithmetic_breakdown", {})
     calc_tally = arith.get("final_tally") or explicit_score
+    acronym, full_name, purpose, scoring_rules, scoring_guide = resolve_tool_scoring_guide(base_data)
 
     # 1. Header Metadata Bar (Green-Themed)
     meta_data = [
         [Paragraph(f"<b>Manuscript:</b> {base_data.get('paper_title', 'N/A')}", body_style), Paragraph(f"<b>Authors:</b> {harvard_authors} ({base_data.get('year_published', 'N/A')})", body_style)],
-        [Paragraph(f"<b>Architecture:</b> {base_data.get('study_design', 'N/A')} | <b>Tool:</b> {base_data.get('appraisal_tool_selected', 'N/A')}", body_style), Paragraph(f"<b>Verified Score:</b> <font color='#1D3B32'><b>{calc_tally}</b></font>", bold_style)],
+        [Paragraph(f"<b>Architecture:</b> {base_data.get('study_design', 'N/A')} | <b>Tool:</b> {full_name} ({acronym})", body_style), Paragraph(f"<b>Verified Score:</b> <font color='#1D3B32'><b>{calc_tally}</b></font>", bold_style)],
     ]
     t_meta = Table(meta_data, colWidths=[4.1 * inch, 3.3 * inch])
     t_meta.setStyle(TableStyle([
@@ -1467,12 +1499,12 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(Spacer(1, 8))
 
     # 2. Tool Selection & Comparative Rationale (Green-Themed)
-    story.append(Paragraph("<b>1. Methodological Tool Selection & Comparative Framework Justification</b>", sec_heading))
+    story.append(Paragraph("<b>1. Methodological Tool Selection & Algorithmic Rejection Rationale</b>", sec_heading))
     rationale = deep_dive.get("tool_selection_rationale", {})
     t_rat_data = [
-        [Paragraph("<b>Mandated Framework:</b>", bold_style), Paragraph(f"<b>{rationale.get('assigned_tool', 'Tool')}</b> ({rationale.get('architecture_classification', 'Design')})", body_style)],
-        [Paragraph("<b>Selection Rationale:</b>", bold_style), Paragraph(rationale.get("selection_justification", "N/A"), body_style)],
-        [Paragraph("<b>Alternative Tools Rejected:</b>", bold_style), Paragraph(rationale.get("competing_tools_rejected", "N/A"), body_style)],
+        [Paragraph("<b>Mandated Framework:</b>", bold_style), Paragraph(f"<b>{rationale.get('assigned_tool', acronym)}</b> ({rationale.get('architecture_classification', base_data.get('study_design'))})", body_style)],
+        [Paragraph("<b>Selection Justification:</b>", bold_style), Paragraph(rationale.get("selection_justification", "N/A"), body_style)],
+        [Paragraph("<b>Alternative Tools Rejected & Decision Rule:</b>", bold_style), Paragraph(rationale.get("competing_tools_rejected", "N/A"), body_style)],
     ]
     t_rat = Table(t_rat_data, colWidths=[1.8 * inch, 5.6 * inch])
     t_rat.setStyle(TableStyle([
@@ -1488,11 +1520,17 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(Spacer(1, 8))
 
     # 3. Step-by-Step Mathematical Derivations & Arithmetic Table (Green-Themed)
-    story.append(Paragraph("<b>2. Step-by-Step Mathematical Derivations & Scoring Arithmetic</b>", sec_heading))
+    story.append(Paragraph("<b>2. Scoring Mechanics, Arithmetic Derivations & Quality Thresholds</b>", sec_heading))
+    scoring_system = deep_dive.get("scoring_system_breakdown", {})
+    how_awarded = scoring_system.get("how_scores_are_awarded") or scoring_guide
+    thresholds = scoring_system.get("quality_thresholds") or scoring_rules
+
     arith_rows = [
+        [Paragraph("<b>How Scoring Works:</b>", bold_style), Paragraph(how_awarded, body_style)],
+        [Paragraph("<b>Quality Thresholds:</b>", bold_style), Paragraph(thresholds, body_style)],
         [Paragraph("<b>Mathematical Formula / Rule:</b>", bold_style), Paragraph(arith.get("formula_used", "N/A"), body_style)],
         [Paragraph("<b>Step-by-Step Derivation:</b>", bold_style), Paragraph(arith.get("step_by_step_calculation", "N/A"), body_style)],
-        [Paragraph("<b>Final Calculated Tally / Score:</b>", bold_style), Paragraph(f"<font color='#1D3B32'><b>{calc_tally}</b></font>", bold_style)],
+        [Paragraph("<b>Final Calculated Score / Tally:</b>", bold_style), Paragraph(f"<font color='#1D3B32'><b>{calc_tally}</b></font>", bold_style)],
     ]
     t_arith = Table(arith_rows, colWidths=[1.8 * inch, 5.6 * inch])
     t_arith.setStyle(TableStyle([
@@ -1584,22 +1622,26 @@ def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     explicit_score = extract_explicit_score_from_data(base_data)
     arith = deep_dive.get("arithmetic_breakdown", {})
     calc_tally = arith.get("final_tally") or explicit_score
+    acronym, full_name, purpose, scoring_rules, scoring_guide = resolve_tool_scoring_guide(base_data)
 
     p_meta = doc.add_paragraph()
     p_meta.add_run("Evaluated Manuscript: ").bold = True
     p_meta.add_run(f"{base_data.get('paper_title')} ({harvard_authors}, {base_data.get('year_published')})\n")
-    p_meta.add_run(f"Architecture: {base_data.get('study_design')} | Gold-Standard Tool: {base_data.get('appraisal_tool_selected')}\n")
+    p_meta.add_run(f"Architecture: {base_data.get('study_design')} | Gold-Standard Tool: {full_name} ({acronym})\n")
     p_meta.add_run(f"Verified Tool Score / Tally: {calc_tally}").bold = True
 
     # 1. Rationale
     doc.add_heading("1. Methodological Tool Selection & Comparative Justification", level=1)
     rat = deep_dive.get("tool_selection_rationale", {})
-    doc.add_paragraph(f"Mandated Tool: {rat.get('assigned_tool')} ({rat.get('architecture_classification')})")
+    doc.add_paragraph(f"Mandated Tool: {rat.get('assigned_tool', acronym)} ({rat.get('architecture_classification', base_data.get('study_design'))})")
     doc.add_paragraph(f"Selection Justification:\n{rat.get('selection_justification')}")
-    doc.add_paragraph(f"Alternative Frameworks Rejected:\n{rat.get('competing_tools_rejected')}")
+    doc.add_paragraph(f"Alternative Frameworks Rejected & Decision Rules:\n{rat.get('competing_tools_rejected')}")
 
     # 2. Arithmetic
-    doc.add_heading("2. Step-by-Step Mathematical Derivations & Score Arithmetic", level=1)
+    doc.add_heading("2. Scoring Mechanics, Mathematical Derivations & Arithmetic", level=1)
+    scoring_system = deep_dive.get("scoring_system_breakdown", {})
+    doc.add_paragraph(f"How Scores are Awarded:\n{scoring_system.get('how_scores_are_awarded', scoring_guide)}")
+    doc.add_paragraph(f"Quality Thresholds:\n{scoring_system.get('quality_thresholds', scoring_rules)}")
     doc.add_paragraph(f"Formula / Decision Gate: {arith.get('formula_used', 'N/A')}")
     doc.add_paragraph(f"Step-by-Step Arithmetic Calculation:\n{arith.get('step_by_step_calculation', 'N/A')}")
     p_fin = doc.add_paragraph()
