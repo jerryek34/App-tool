@@ -554,12 +554,14 @@ def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
 @st.cache_data(show_spinner=False)
 def extract_text_from_url(raw_input: str) -> str:
     target = raw_input.strip()
-    if not target.startswith("http://) and not target.startswith("https://):
+    http_prefix = "http:" + "//"
+    https_prefix = "https:" + "//"
+    if not target.startswith((http_prefix, https_prefix)):
         if target.startswith("10.") or "/10." in target:
             clean_doi = target[target.find("10.") :]
-            target = f"https://doi.org/{clean_doi}"
+            target = f"{https_prefix}doi.org/{clean_doi}"
         else:
-            target = f"https://{target}"
+            target = f"{https_prefix}{target}"
 
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     resp = requests.get(target, headers=headers, timeout=15)
@@ -575,15 +577,14 @@ def find_probable_title_and_header(text: str) -> Tuple[str, str]:
     """
     Crossref-inspired heuristic title detector.
     Evaluates the top 45 lines of the document, penalizing publisher boilerplate
-    (Elsevier, ScienceDirect, DOI, ISSN, affiliations, emails) and rewarding
-    title-length lines and study-architecture keywords.
+    and rewarding title-length lines and study-architecture keywords.
     """
     lines = [line.strip() for line in text[:4500].split("\n") if line.strip()]
     top_lines = lines[:45]
 
     boilerplate_patterns = re.compile(
         r"(?i)(?:sciencedirect|elsevier|springer|wiley|contents\s+lists\s+available|"
-        r"journal\s+homepage|http://|https://|doi\.org|10\.\d{4}/|issn\s+\d|"
+        r"journal\s+homepage|http:|https:|doi\.org|10\.\d{4}/|issn\s+\d|"
         r"received\s+\d|accepted\s+\d|available\s+online|copyright|all\s+rights\s+reserved|"
         r"corresponding\s+author|e-mail\s+address|department\s+of|university\s+of|"
         r"hospital|institute\s+of|school\s+of\s+medicine|faculty\s+of|--- \[page)"
@@ -593,14 +594,12 @@ def find_probable_title_and_header(text: str) -> Tuple[str, str]:
     category_tags = []
 
     for idx, line in enumerate(top_lines):
-        # Capture short category headers like "ESPEN Guideline" or "Original Article"
         if len(line) < 40 and re.search(r"(?i)\b(?:guideline|consensus|original\s+article|review\s+article|clinical\s+trial)\b", line):
             category_tags.append(line)
 
         if boilerplate_patterns.search(line):
             continue
 
-        # Skip author lists (many commas and superscripts/initials)
         if line.count(",") >= 3:
             continue
 
@@ -613,15 +612,12 @@ def find_probable_title_and_header(text: str) -> Tuple[str, str]:
         else:
             score -= 20
 
-        # Position bonus (usually lines 2 to 18)
         if 1 <= idx <= 18:
             score += 20
 
-        # Study design keyword bonus in title
         if re.search(r"(?i)\b(?:guideline|consensus|systematic\s+review|meta-analysis|randomized|trial|cohort|case-control|cross-sectional|prevalence|complications)\b", line):
             score += 30
 
-        # Penalty for ending with a period (sentences vs titles)
         if line.endswith("."):
             score -= 10
 
@@ -630,7 +626,6 @@ def find_probable_title_and_header(text: str) -> Tuple[str, str]:
     scored_candidates.sort(key=lambda x: x[0], reverse=True)
     best_title = scored_candidates[0][2] if scored_candidates else (top_lines[0] if top_lines else "")
 
-    # Also grab the line immediately following best_title if it looks like a subtitle continuation
     if scored_candidates:
         best_idx = scored_candidates[0][1]
         if best_idx + 1 < len(top_lines):
@@ -643,17 +638,12 @@ def find_probable_title_and_header(text: str) -> Tuple[str, str]:
 
 
 def parse_manuscript_sections(text: str) -> Dict[str, str]:
-    """
-    Section-aware parser using heuristic title detection and explicit regex boundary anchors.
-    """
     detected_title, title_zone = find_probable_title_and_header(text)
     lower = text.lower()
 
-    # Locate Abstract / Summary
     abs_match = re.search(r"\n(?:\s*)(?:abstract|summary|s\s+u\s+m\s+m\s+a\s+r\s+y|background\s+and\s+aims)\b", lower[:5000])
     abs_start = abs_match.start() if abs_match else min(600, len(text))
 
-    # Locate Methods / Methodology
     m_match = re.search(r"\n(?:\d+\.?\s*)?(?:methods|methodology|materials\s+and\s+methods|patients\s+and\s+methods|study\s+design|search\s+strategy)\b", lower)
     r_match = re.search(r"\n(?:\d+\.?\s*)?(?:results|findings|basic\s+questions|recommendations)\b", lower)
     d_match = re.search(r"\n(?:\d+\.?\s*)?(?:discussion|commentary|conclusion)\b", lower)
@@ -734,11 +724,6 @@ def format_harvard_filename(data: dict, extension: str, tag: str = "KAT") -> str
 # 3. HIERARCHICAL OVERRIDES & CONSISTENCY AUDITOR
 # ==========================================
 def detect_hierarchical_overrides(sections: Dict[str, str]) -> Optional[Tuple[str, List[str], List[str]]]:
-    """
-    Evidence Hierarchy Short-Circuit:
-    Guidelines contain systematic reviews; systematic reviews do not contain graded consensus recommendations.
-    If an unambiguous structural signature of a higher-order design is present, return immediately without voting.
-    """
     title_l = sections["title"].lower()
     abs_l = sections["abstract"].lower()
     meth_l = sections["methods"].lower()
@@ -800,9 +785,6 @@ def detect_hierarchical_overrides(sections: Dict[str, str]) -> Optional[Tuple[st
 
 
 def run_deterministic_section_classifier(sections: Dict[str, str]) -> Tuple[str, Dict[str, int], List[str], List[str], bool]:
-    """
-    Classifier A: First checks Hierarchical Short-Circuits, then falls back to Section-Aware Scoring.
-    """
     override = detect_hierarchical_overrides(sections)
     if override:
         winner, decision_path, excluded = override
@@ -817,7 +799,6 @@ def run_deterministic_section_classifier(sections: Dict[str, str]) -> Tuple[str,
     decision_path = []
     excluded_alternatives = []
 
-    # 1. Title-Zone Rules
     title_rules = [
         ("Clinical Practice Guideline / Consensus Statement", [r"\bguidelines?\b", r"\bconsensus\b"], 85),
         ("Systematic Review / Meta-Analysis", [r"\bsystematic\s+review\b", r"\bmeta-analysis\b"], 80),
@@ -839,7 +820,6 @@ def run_deterministic_section_classifier(sections: Dict[str, str]) -> Tuple[str,
                 decision_path.append(f"Title zone matched '{m.group(0)}' (+{pts} pts for {design})")
                 break
 
-    # 2. Methods & Abstract Empirical Signals
     if re.search(r"\b(?:retrospective\s+review|medical\s+records\s+were\s+reviewed|consecutive\s+patients|patients\s+who\s+underwent|institutional\s+review\s+board|irb\s+approval)\b", meth_l + abs_l):
         scores["Observational Study (Cohort)"] += 65
         scores["Narrative Review"] -= 45
@@ -914,11 +894,6 @@ def run_llm_classifier_b(client: Optional[genai.Client], sections: Dict[str, str
 def run_framework_consistency_auditor(
     text: str, client: Optional[genai.Client], available_designs: List[str]
 ) -> dict:
-    """
-    Executes Hierarchical Override Check, Section-Aware Classification, and Calibrated Disagreement Penalty.
-    Does NOT trigger annoying hard stops on borderline Cohort vs Case-Control disagreements;
-    instead deducts 0.15 confidence and only flags human review if confidence < 0.80 or margin < 15.
-    """
     sections = parse_manuscript_sections(text)
     rule_winner, score_map, decision_path, excluded_alts, is_hierarchical = run_deterministic_section_classifier(sections)
     llm_winner, llm_rationale = run_llm_classifier_b(client, sections, available_designs)
@@ -976,19 +951,11 @@ def validate_framework_signature_and_legality(
     generated_domains: List[dict],
     manuscript_text: str
 ) -> Tuple[List[str], List[str]]:
-    """
-    Split into:
-    1. HARD FAILS (ClassificationConsistencyError): Objective impossibilities
-       - Illegal Design <-> Tool pairing (e.g. Guideline + AMSTAR 2)
-       - Cross-contaminated tool domains (e.g. AMSTAR 2 outputting AGREE II 'Stakeholder Involvement')
-       - Source manuscript impossible combinations (e.g. RCT with zero mention of random/allocation/trial)
-    2. WARNINGS ONLY: Probabilistic keyword overlap or short methods sections.
-    """
     passed_notes = []
     warnings = []
     text_lower = manuscript_text.lower() if manuscript_text else ""
 
-    # --- HARD FAIL 1: Legality Matrix ---
+    # HARD FAIL 1: Legality Matrix
     if design in LEGAL_PAIRS:
         allowed_tools = LEGAL_PAIRS[design]
         if not any(allowed.lower() in selected_tool.lower() or selected_tool.lower() in allowed.lower() for allowed in allowed_tools):
@@ -997,14 +964,14 @@ def validate_framework_signature_and_legality(
             )
         passed_notes.append(f"Legality Matrix Verified: '{design}' <-> '{selected_tool}'")
 
-    # --- HARD FAIL 2: Foreign Tool Domain Cross-Contamination ---
+    # HARD FAIL 2: Foreign Tool Domain Cross-Contamination
     domain_names_blob = " ".join([str(d.get("domain_name", "")).lower() for d in generated_domains])
     if "AMSTAR" in selected_tool.upper() and ("stakeholder involvement" in domain_names_blob or "editorial independence" in domain_names_blob):
         raise ClassificationConsistencyError("Hard Fail — Cross-Contamination: AMSTAR 2 output contains AGREE II guideline domains.")
     if "AGREE" in selected_tool.upper() and ("duplicate study selection" in domain_names_blob or "publication bias" in domain_names_blob):
         raise ClassificationConsistencyError("Hard Fail — Cross-Contamination: AGREE II output contains AMSTAR 2 review domains.")
 
-    # --- HARD FAIL 3: Source-Manuscript Direct Verification ---
+    # HARD FAIL 3: Source-Manuscript Direct Verification
     sig = FRAMEWORK_SIGNATURES.get(design)
     if sig and text_lower:
         must_have_any = sig.get("source_must_have_any", [])
@@ -1018,7 +985,7 @@ def validate_framework_signature_and_legality(
             if re.search(forbidden_pat, text_lower[:8000]):
                 warnings.append(f"Source Advisory: Detected phrase matching '{forbidden_pat}' in manuscript; verify architecture.")
 
-    # --- SOFT WARNING: Expected Domain Keyword Overlap ---
+    # SOFT WARNING: Expected Domain Keyword Overlap
     if sig and generated_domains:
         expected_kws = sig.get("expected_domain_keywords", [])
         matches = sum(1 for kw in expected_kws if kw in domain_names_blob)
@@ -1079,10 +1046,6 @@ def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.85) -> 
 def run_comprehensive_checksum(
     data: dict, full_raw_text: str
 ) -> Tuple[dict, float, List[str], List[str]]:
-    """
-    Fixes the 100% groundedness bug when source text is missing (returns 0.0%).
-    Splits threshold: Direct quotes require >= 0.95 similarity; Paraphrased evidence requires >= 0.85.
-    """
     grounding_warnings: List[str] = []
     flaw_warnings: List[str] = []
 
@@ -1178,7 +1141,6 @@ def reconcile_appraisal_scores(parsed: dict, assigned_design: Optional[str] = No
     if not domains:
         return parsed
 
-    # 1. SANRA Deterministic Reconciliation
     if "SANRA" in tool_name:
         total_pts = 0
         for d in domains:
@@ -1204,7 +1166,6 @@ def reconcile_appraisal_scores(parsed: dict, assigned_design: Optional[str] = No
         parsed["overall_verdict"] = verdict
         parsed.setdefault("ratings_summary", {})["methodology_quality"] = meth_quality
 
-    # 2. AGREE II Deterministic Reconciliation (1-7 Scale)
     elif "AGREE" in tool_name:
         total_pts = 0
         count = len(domains)
@@ -1226,7 +1187,6 @@ def reconcile_appraisal_scores(parsed: dict, assigned_design: Optional[str] = No
         parsed["agree_scaled_percentage"] = scaled_pct
         parsed.setdefault("ratings_summary", {})["methodology_quality"] = meth_quality
 
-    # 3. Newcastle-Ottawa Scale (NOS)
     elif "NOS" in tool_name or "NEWCASTLE" in tool_name:
         sel_stars, comp_stars, out_stars = 0, 0, 0
         for d in domains:
@@ -1259,7 +1219,6 @@ def reconcile_appraisal_scores(parsed: dict, assigned_design: Optional[str] = No
         parsed["overall_verdict"] = verdict
         parsed.setdefault("ratings_summary", {})["methodology_quality"] = meth_quality
 
-    # 4. Cochrane RoB 2 / ROBINS-I / AMSTAR 2 / QUADAS-2
     elif "ROB" in tool_name or "AMSTAR" in tool_name or "QUADAS" in tool_name:
         ratings = [str(d.get("rating", "")).lower() for d in domains]
         high_crit_count = sum(1 for r in ratings if ("high" in r or "critical" in r or "serious" in r or r == "no" or "not met" in r))
@@ -1469,10 +1428,8 @@ def execute_manuscript_evaluation(
                 if "authors" in parsed:
                     parsed["authors"] = format_harvard_authors(parsed["authors"], max_authors=3)
 
-                # 1. Deterministic Score Reconciliation
                 parsed = reconcile_appraisal_scores(parsed, assigned_design=assigned_design)
 
-                # 2. Framework Consistency Auditor (Hard Fails + Soft Warnings + Source Verification)
                 passed_notes, auditor_warnings = validate_framework_signature_and_legality(
                     assigned_design or parsed.get("study_design", ""),
                     parsed.get("appraisal_tool_selected", ""),
@@ -2636,4 +2593,4 @@ else:
                             st.markdown(reply)
                             st.session_state["chat_history"].append({"role": "assistant", "content": reply})
                         except Exception as err:
-                            st.error(f"Query error: {err}") any good?
+                            st.error(f"Query error: {err}")
