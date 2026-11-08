@@ -843,7 +843,7 @@ def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str
         "purpose": "Precise methodological purpose",
         "domains": [{"name": "Domain Title", "question": "Criterion question"}],
         "scale": "Scoring thresholds and rules",
-        "score_interpretation": "Explicit definition of what each point, star, or score level (e.g. 0, 1, 2) represents.",
+        "score_interpretation": "Explicit definition of what each point, star, or score level represents.",
         "scoring_guide": "Step-by-step plain-English explanation."
       }
     }
@@ -866,11 +866,123 @@ def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str
     raise RuntimeError("Failed to discover tool schema across all free models.")
 
 
+def reconcile_appraisal_scores(parsed: dict) -> dict:
+    """
+    Deterministically computes mathematical totals from the domain ratings
+    and ensures overall_verdict and ratings_summary align with individual domain grades.
+    """
+    tool_name = str(parsed.get("appraisal_tool_selected", "")).upper()
+    domains = parsed.get("domain_appraisals", [])
+
+    if not domains:
+        return parsed
+
+    # --- 1. SANRA Deterministic Reconciliation ---
+    if "SANRA" in tool_name:
+        total_pts = 0
+        for d in domains:
+            r_str = str(d.get("rating", "")).strip().lower()
+            digit_match = re.search(r"\b([0-2])\b", r_str)
+            if digit_match:
+                pts = int(digit_match.group(1))
+            elif "not met" in r_str or "no" in r_str or "absent" in r_str:
+                pts = 0
+            elif "partially" in r_str or "partial" in r_str:
+                pts = 1
+            else:
+                pts = 2
+            total_pts += pts
+
+        # Standard SANRA thresholds: 9-12 High, 6-8 Moderate, 0-5 Low
+        if total_pts >= 9:
+            verdict = "High Quality / Low Risk"
+            meth_quality = "GOOD"
+        elif total_pts >= 6:
+            verdict = "Moderate Quality / Moderate Risk"
+            meth_quality = "FAIR"
+        else:
+            verdict = "Low Quality / High Risk"
+            meth_quality = "POOR"
+
+        parsed["overall_verdict"] = verdict
+        if "ratings_summary" not in parsed:
+            parsed["ratings_summary"] = {}
+        parsed["ratings_summary"]["methodology_quality"] = meth_quality
+
+    # --- 2. Newcastle-Ottawa Scale (NOS) Deterministic Reconciliation ---
+    elif "NOS" in tool_name or "NEWCASTLE" in tool_name:
+        sel_stars = 0
+        comp_stars = 0
+        out_stars = 0
+
+        for d in domains:
+            d_name = str(d.get("domain_name", "")).lower()
+            stars_in_critique = str(d.get("rating", "")).count("★") or str(d.get("rating", "")).count("*")
+            if stars_in_critique == 0:
+                match = re.search(r"\b([0-4])\s*(?:stars?|★)?\b", str(d.get("rating", "")).lower())
+                stars_in_critique = int(match.group(1)) if match else 0
+
+            if "selection" in d_name:
+                sel_stars += min(stars_in_critique, 4)
+            elif "comparability" in d_name:
+                comp_stars += min(stars_in_critique, 2)
+            elif "outcome" in d_name or "exposure" in d_name:
+                out_stars += min(stars_in_critique, 3)
+
+        total_stars = sel_stars + comp_stars + out_stars
+        parsed["nos_score_breakdown"] = {
+            "selection_stars": sel_stars,
+            "comparability_stars": comp_stars,
+            "outcome_stars": out_stars,
+            "total_stars": total_stars
+        }
+
+        if total_stars >= 7:
+            verdict = "Good Quality / Low Risk"
+            meth_quality = "GOOD"
+        elif total_stars >= 4:
+            verdict = "Fair Quality / Moderate Risk"
+            meth_quality = "FAIR"
+        else:
+            verdict = "Poor Quality / High Risk"
+            meth_quality = "POOR"
+
+        parsed["overall_verdict"] = verdict
+        if "ratings_summary" not in parsed:
+            parsed["ratings_summary"] = {}
+        parsed["ratings_summary"]["methodology_quality"] = meth_quality
+
+    # --- 3. Cochrane RoB 2 / ROBINS-I / AMSTAR 2 / QUADAS-2 Deterministic Gates ---
+    elif "ROB" in tool_name or "AMSTAR" in tool_name or "QUADAS" in tool_name:
+        ratings = [str(d.get("rating", "")).lower() for d in domains]
+        high_crit_count = sum(1 for r in ratings if "high" in r or "critical" in r or "serious" in r)
+        some_concerns = sum(1 for r in ratings if "some" in r or "moderate" in r or "unclear" in r)
+
+        if high_crit_count >= 1:
+            parsed["overall_verdict"] = "High Risk of Bias"
+            if "ratings_summary" not in parsed:
+                parsed["ratings_summary"] = {}
+            parsed["ratings_summary"]["methodology_quality"] = "POOR"
+        elif some_concerns >= 1:
+            parsed["overall_verdict"] = "Some Concerns / Moderate Risk"
+            if "ratings_summary" not in parsed:
+                parsed["ratings_summary"] = {}
+            parsed["ratings_summary"]["methodology_quality"] = "FAIR"
+        else:
+            parsed["overall_verdict"] = "Low Risk of Bias"
+            if "ratings_summary" not in parsed:
+                parsed["ratings_summary"] = {}
+            parsed["ratings_summary"]["methodology_quality"] = "GOOD"
+
+    return parsed
+
+
 def extract_explicit_score_from_data(data: dict) -> str:
-    """Extracts or derives the tool's definitive numerical or scale score consistently."""
+    """Extracts or derives the tool's definitive numerical or scale score accurately."""
     tool_name = str(data.get("appraisal_tool_selected", "")).upper()
     verdict = str(data.get("overall_verdict", "N/A"))
 
+    # 1. Specialized Newcastle-Ottawa Scale (NOS)
     nos_stars = data.get("nos_score_breakdown")
     if isinstance(nos_stars, dict) and nos_stars.get("total_stars") is not None and nos_stars.get("total_stars", 0) > 0:
         sel = nos_stars.get("selection_stars", 0)
@@ -879,28 +991,35 @@ def extract_explicit_score_from_data(data: dict) -> str:
         tot = nos_stars.get("total_stars", 0)
         return f"{tot}/9 Stars (Selection: {sel}★ | Comparability: {comp}★ | Outcome: {out}★) — {verdict}"
 
+    # 2. Check for explicit arithmetic in deep_dive
     arith = data.get("arithmetic_breakdown")
     if isinstance(arith, dict) and arith.get("final_tally"):
         return f"{arith.get('final_tally')} — {verdict}"
 
     domains = data.get("domain_appraisals", [])
     if domains:
-        ratings = [str(d.get("rating", "")).lower() for d in domains]
-        low_count = sum(1 for r in ratings if "low" in r or "yes" in r or "met" in r)
-        some_concerns = sum(1 for r in ratings if "some" in r or "moderate" in r or "partially" in r or "unclear" in r)
-        high_count = sum(1 for r in ratings if "high" in r or "serious" in r or "critical" in r or "no" in r)
+        if "SANRA" in tool_name:
+            total_points = 0
+            for d in domains:
+                r_str = str(d.get("rating", "")).strip().lower()
+                match = re.search(r"\b([0-2])\b", r_str)
+                if match:
+                    total_points += int(match.group(1))
+                else:
+                    if "not met" in r_str or "no" in r_str or "absent" in r_str:
+                        total_points += 0
+                    elif "partially" in r_str or "partial" in r_str:
+                        total_points += 1
+                    elif "completely" in r_str or "yes" in r_str or "met" in r_str:
+                        total_points += 2
+            return f"{total_points}/12 Points — {verdict}"
 
-        if "AMSTAR" in tool_name or "ROB" in tool_name or "QUADAS" in tool_name:
+        elif "AMSTAR" in tool_name or "ROB" in tool_name or "QUADAS" in tool_name:
+            ratings = [str(d.get("rating", "")).lower() for d in domains]
+            low_count = sum(1 for r in ratings if ("low" in r or "yes" in r or "met" in r) and "not" not in r)
+            some_concerns = sum(1 for r in ratings if "some" in r or "moderate" in r or "partially" in r or "unclear" in r)
+            high_count = sum(1 for r in ratings if "high" in r or "serious" in r or "critical" in r or "not met" in r or "no" in r)
             return f"Low: {low_count} | Concerns: {some_concerns} | High/Crit: {high_count} (of {len(domains)} Domains) — {verdict}"
-        elif "SANRA" in tool_name:
-            pts = 0
-            for r in ratings:
-                if "2" in r or "met" in r:
-                    pts += 2
-                elif "1" in r or "partially" in r:
-                    pts += 1
-            if pts > 0:
-                return f"{pts}/12 Points — {verdict}"
 
     return verdict
 
@@ -1055,6 +1174,10 @@ def execute_manuscript_evaluation(
                 parsed = json.loads(raw_text)
                 if "authors" in parsed:
                     parsed["authors"] = format_harvard_authors(parsed["authors"], max_authors=3)
+
+                # Deterministically compute mathematical score totals
+                parsed = reconcile_appraisal_scores(parsed)
+
                 if classification_trace:
                     if "audit_log" not in parsed:
                         parsed["audit_log"] = {}
@@ -1082,12 +1205,6 @@ def generate_forensic_deep_dive(
     base_data: dict,
     full_text: str = ""
 ) -> dict:
-    """
-    Publication-grade academic forensic appraisal.
-    Hard-locks assigned appraisal framework from base_data so the design cannot drift.
-    Explains tool choice and rejection algorithm, defines individual point interpretations,
-    shows step-by-step arithmetic, strips boilerplate, and conducts an in-depth substantive methodological autopsy.
-    """
     locked_tool = base_data.get("appraisal_tool_selected", "Assigned Tool")
     locked_design = base_data.get("study_design", "Assigned Design")
     base_domains = base_data.get("domain_appraisals", [])
