@@ -37,11 +37,51 @@ APP_NAME = "Kitique Appraisal Tool"
 ASSISTANT_NAME = "Ki's Assistant"
 MIN_CONFIDENCE_MARGIN = 15
 
+# Default fast & free Gemini API models
 FREE_ACTIVE_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-3.5-flash-lite",
+    "gemini-3.8-flash",
     "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-flash",
 ]
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_active_models(api_key_str: str) -> List[str]:
+    """
+    Dynamically queries the Gemini API for active models that support generateContent on this API key.
+    Uses api_key_str as a hashable string so Streamlit caching works without failing on Client objects.
+    Eliminates 404 NOT_FOUND model errors permanently.
+    """
+    if not api_key_str:
+        return FREE_ACTIVE_MODELS
+    try:
+        temp_client = genai.Client(api_key=api_key_str)
+        available_api_models = []
+        for m in temp_client.models.list():
+            name = getattr(m, "name", "")
+            if name.startswith("models/"):
+                name = name.replace("models/", "")
+            actions = getattr(m, "supported_actions", []) or []
+            if actions and "generateContent" not in actions:
+                continue
+            if "flash" in name and not any(
+                excl in name for excl in ["image", "tts", "audio", "live", "transcribe", "omni", "thinking", "8b"]
+            ):
+                available_api_models.append(name)
+
+        if not available_api_models:
+            return FREE_ACTIVE_MODELS
+
+        verified = [m for m in FREE_ACTIVE_MODELS if m in available_api_models]
+        for m in sorted(available_api_models, reverse=True):
+            if m not in verified:
+                verified.append(m)
+
+        return verified if verified else available_api_models
+    except Exception:
+        return FREE_ACTIVE_MODELS
 
 
 class ClassificationConsistencyError(Exception):
@@ -574,11 +614,6 @@ def extract_text_from_url(raw_input: str) -> str:
 
 
 def find_probable_title_and_header(text: str) -> Tuple[str, str]:
-    """
-    Crossref-inspired heuristic title detector.
-    Evaluates the top 45 lines of the document, penalizing publisher boilerplate
-    and rewarding title-length lines and study-architecture keywords.
-    """
     lines = [line.strip() for line in text[:4500].split("\n") if line.strip()]
     top_lines = lines[:45]
 
@@ -696,7 +731,7 @@ def format_harvard_authors(raw_authors: str, max_authors: int = 3) -> str:
         return f"{', '.join(parsed_authors[:-1])} and {parsed_authors[-1]}"
 
 
-def format_harvard_filename(data: dict, extension: str, tag: str = "KAT") -> str:
+def format_harvard_filename(data: dict, extension: str, tag: str = "Short") -> str:
     raw_authors = str(data.get("authors", "")).strip()
     year = str(data.get("year_published", "")).strip()
     tool = str(data.get("appraisal_tool_selected", "Tool")).strip()
@@ -848,8 +883,8 @@ def run_deterministic_section_classifier(sections: Dict[str, str]) -> Tuple[str,
     return winner, scores, decision_path, excluded_alternatives, False
 
 
-def run_llm_classifier_b(client: Optional[genai.Client], sections: Dict[str, str], available_designs: List[str]) -> Tuple[str, str]:
-    if not client:
+def run_llm_classifier_b(client: Optional[genai.Client], api_key_str: str, sections: Dict[str, str], available_designs: List[str]) -> Tuple[str, str]:
+    if not client or not api_key_str:
         return "", "No API key active"
     valid_list = [d for d in available_designs if not d.startswith("🔍")]
     prompt = f"""
@@ -875,7 +910,7 @@ def run_llm_classifier_b(client: Optional[genai.Client], sections: Dict[str, str
       "llm_rationale": "1 sentence explanation"
     }}
     """
-    for model_name in FREE_ACTIVE_MODELS:
+    for model_name in get_active_models(api_key_str):
         try:
             resp = client.models.generate_content(
                 model=model_name,
@@ -892,11 +927,11 @@ def run_llm_classifier_b(client: Optional[genai.Client], sections: Dict[str, str
 
 
 def run_framework_consistency_auditor(
-    text: str, client: Optional[genai.Client], available_designs: List[str]
+    text: str, client: Optional[genai.Client], api_key_str: str, available_designs: List[str]
 ) -> dict:
     sections = parse_manuscript_sections(text)
     rule_winner, score_map, decision_path, excluded_alts, is_hierarchical = run_deterministic_section_classifier(sections)
-    llm_winner, llm_rationale = run_llm_classifier_b(client, sections, available_designs)
+    llm_winner, llm_rationale = run_llm_classifier_b(client, api_key_str, sections, available_designs)
 
     sorted_scores = sorted(score_map.items(), key=lambda x: x[1], reverse=True)
     first_design, first_score = sorted_scores[0]
@@ -1094,7 +1129,7 @@ def run_comprehensive_checksum(
     return data, grounded_score, grounding_warnings, flaw_warnings
 
 
-def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str, dict]:
+def discover_appraisal_tool(client: genai.Client, api_key_str: str, text_sample: str) -> Tuple[str, dict]:
     discovery_instruction = """
     Examine research text and return JSON:
     {
@@ -1110,7 +1145,7 @@ def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str
       }
     }
     """
-    for model_name in FREE_ACTIVE_MODELS:
+    for model_name in get_active_models(api_key_str):
         try:
             response = client.models.generate_content(
                 model=model_name,
@@ -1314,6 +1349,7 @@ def resolve_tool_scoring_guide(data: dict) -> Tuple[str, str, str, str, str, str
 
 def execute_manuscript_evaluation(
     client: genai.Client,
+    api_key_str: str,
     text_content: Optional[str] = None,
     raw_pdf_bytes: Optional[bytes] = None,
     assigned_design: Optional[str] = None,
@@ -1406,8 +1442,10 @@ def execute_manuscript_evaluation(
     if not contents:
         raise ValueError("No valid manuscript text or PDF bytes supplied.")
 
-    last_exception = None
-    for model_name in FREE_ACTIVE_MODELS:
+    models_to_try = get_active_models(api_key_str)
+    error_log = []
+
+    for model_name in models_to_try:
         for attempt in range(2):
             try:
                 response = client.models.generate_content(
@@ -1439,6 +1477,7 @@ def execute_manuscript_evaluation(
 
                 parsed.setdefault("audit_log", {})["consistency_auditor_notes"] = passed_notes
                 parsed["audit_log"]["consistency_auditor_warnings"] = auditor_warnings
+                parsed["audit_log"]["model_used"] = model_name
                 if self_audit_report:
                     parsed["audit_log"]["classification_decision_tree"] = self_audit_report.get("decision_tree", [])
                     parsed["audit_log"]["self_audit_report"] = self_audit_report
@@ -1447,12 +1486,12 @@ def execute_manuscript_evaluation(
             except ClassificationConsistencyError as ce:
                 raise ce
             except (json.JSONDecodeError, KeyError, ValueError) as parse_err:
-                last_exception = parse_err
+                error_log.append(f"{model_name}: JSON parse error ({parse_err})")
                 time.sleep(1.0)
                 continue
             except Exception as e:
-                last_exception = e
                 err_str = str(e)
+                error_log.append(f"{model_name}: {err_str[:120]}")
                 if "429" in err_str or "503" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                     time.sleep(2.0)
                     continue
@@ -1460,14 +1499,15 @@ def execute_manuscript_evaluation(
                     break
                 time.sleep(1.0)
 
-    raise RuntimeError(f"Appraisal pipeline failed on active models. Details: {str(last_exception)}")
+    raise RuntimeError(f"Appraisal pipeline failed across models ({', '.join(models_to_try)}). Log: {' | '.join(error_log)}")
 
 
 # ==========================================
-# 5. FORENSIC DEEP-DIVE GENERATOR
+# 5. LONG VERSION GENERATOR
 # ==========================================
-def generate_forensic_deep_dive(
+def generate_long_version(
     client: genai.Client,
+    api_key_str: str,
     base_data: dict,
     full_text: str = ""
 ) -> dict:
@@ -1479,8 +1519,8 @@ def generate_forensic_deep_dive(
 
     short_context = full_text[:8000] if full_text else ""
 
-    deep_prompt = f"""
-    You are a distinguished university professor of clinical epidemiology and biostatistics conducting a formal, publication-standard forensic appraisal report.
+    long_prompt = f"""
+    You are an expert clinical epidemiology and biostatistics reviewer writing the Long Version of the critical appraisal report.
 
     IMMUTABLE FRAMEWORK CONSTRAINT:
     - YOU MUST AUDIT THIS PAPER UNDER THE EXACT ASSIGNED TOOL: "{locked_tool}" ({locked_design}).
@@ -1494,72 +1534,72 @@ def generate_forensic_deep_dive(
     MANUSCRIPT CONTEXT EXCERPT:
     {short_context}
 
-    AUDIT OBJECTIVES & REQUIREMENTS (PUBLISHING-GRADE RIGOUR):
-    1. TOOL SELECTION RATIONALE & COMPARATIVE REJECTION ALGORITHM:
-       - Explain with formal academic reasoning why "{locked_tool}" was methodologically mandated for this manuscript architecture ({locked_design}).
-       - Document the explicit algorithmic filtering steps and rejection criteria for competing tools.
-    2. EXPLICIT SCORE INTERPRETATION & ARITHMETIC DERIVATIONS:
-       - Detail what each individual score level means for "{locked_tool}".
-       - Show the exact arithmetic derivation leading to "{explicit_score}".
-    3. ZERO RISK-OF-BIAS BOILERPLATE:
-       - Strip all generic textbook filler. Jump directly to concrete empirical facts from the paper.
+    REQUIREMENTS FOR THE LONG VERSION:
+    1. TOOL SELECTION & REJECTION EXPLANATION:
+       - Explain why "{locked_tool}" was chosen for this study design ({locked_design}).
+       - Explain the rules and reasons why other tools were rejected.
+    2. SCORE INTERPRETATION & STEP-BY-STEP MATH:
+       - Explain what each individual score number or level means for "{locked_tool}".
+       - Show the exact step-by-step math leading to "{explicit_score}".
+    3. NO GENERIC BOILERPLATE:
+       - Skip textbook definitions. Focus directly on facts, numbers, and details from the paper.
     4. AT LEAST 2 TO 3 SUBSTANTIVE CONTENT CRITICISMS:
-       - Detail deep, specific methodological vulnerabilities.
-    5. DETAILED DOMAIN AUTOPSY:
-       - Walk through each domain evaluated, providing forensic empirical observations and statistical impact.
+       - Detail specific methodological weaknesses in the study.
+    5. DETAILED DOMAIN BREAKDOWN:
+       - Walk through each domain evaluated, what was found in the paper, and any design or statistical issues.
 
     CRITICAL: Output ONLY a valid JSON object matching:
     {{
       "tool_selection_rationale": {{
         "assigned_tool": "{locked_tool}",
         "architecture_classification": "{locked_design}",
-        "selection_justification": "Detailed academic rationale explaining why this tool is gold-standard for this design.",
-        "competing_tools_rejected": "Comparison against other instruments and algorithmic rules explaining why each was rejected."
+        "selection_justification": "Detailed explanation of why this tool fits this study design.",
+        "competing_tools_rejected": "Comparison against other tools and why each was rejected."
       }},
       "scoring_system_breakdown": {{
-        "individual_score_meanings": "Explicit breakdown of what each grade or point means.",
-        "how_scores_are_awarded": "Step-by-step description of how domain points are aggregated under {locked_tool}.",
-        "quality_thresholds": "What specific scores indicate High, Moderate, or Poor quality under this instrument."
+        "individual_score_meanings": "Clear breakdown of what each grade or point means.",
+        "how_scores_are_awarded": "Step-by-step description of how domain points are added up under {locked_tool}.",
+        "quality_thresholds": "What specific scores indicate High, Moderate, or Poor quality."
       }},
       "arithmetic_breakdown": {{
         "formula_used": "Exact mathematical equation or grading rule",
-        "step_by_step_calculation": "Step-by-step arithmetic derivation",
+        "step_by_step_calculation": "Step-by-step math calculation",
         "final_tally": "{explicit_score}"
       }},
       "substantive_criticisms": [
         {{
-          "flaw_title": "Deficit 1",
-          "manuscript_evidence": "Exact numbers, line citations, or empirical data",
-          "epidemiological_impact": "Direct scientific impact on validity"
+          "flaw_title": "Weakness 1",
+          "manuscript_evidence": "Exact numbers, line citations, or facts from the paper",
+          "epidemiological_impact": "How this affects the reliability of the results"
         }},
         {{
-          "flaw_title": "Deficit 2",
-          "manuscript_evidence": "Exact numbers, line citations, or empirical data",
-          "epidemiological_impact": "Direct scientific impact on validity"
+          "flaw_title": "Weakness 2",
+          "manuscript_evidence": "Exact numbers, line citations, or facts from the paper",
+          "epidemiological_impact": "How this affects the reliability of the results"
         }},
         {{
-          "flaw_title": "Deficit 3",
-          "manuscript_evidence": "Exact numbers, line citations, or empirical data",
-          "epidemiological_impact": "Direct scientific impact on validity"
+          "flaw_title": "Weakness 3",
+          "manuscript_evidence": "Exact numbers, line citations, or facts from the paper",
+          "epidemiological_impact": "How this affects the reliability of the results"
         }}
       ],
       "domain_deep_dives": [
         {{
           "domain_name": "Domain Title",
           "score_awarded": "Score",
-          "direct_empirical_finding": "Direct observation from paper",
-          "statistical_or_design_flaw": "Vulnerability identified"
+          "direct_empirical_finding": "Direct finding from the paper",
+          "statistical_or_design_flaw": "Specific issue identified"
         }}
       ],
-      "translational_verdict_and_advisory": "Final academic synthesis on whether clinicians should adopt, adapt, or reject these findings."
+      "translational_verdict_and_advisory": "Final takeaway on how clinicians should use these findings in practice."
     }}
     """
 
-    for model_name in FREE_ACTIVE_MODELS:
+    for model_name in get_active_models(api_key_str):
         try:
             response = client.models.generate_content(
                 model=model_name,
-                contents=[deep_prompt],
+                contents=[long_prompt],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     temperature=0.0,
@@ -1575,16 +1615,16 @@ def generate_forensic_deep_dive(
         except Exception:
             continue
 
-    raise RuntimeError("Deep-dive forensic audit failed on active models.")
+    raise RuntimeError("Long version generation failed across active models.")
 
 
 # ==========================================
-# 6. UNIFIED SEAFOAM GREEN REPORT GENERATORS
+# 6. UNIFIED SEAFOAM GREEN REPORT GENERATORS (SHORT & LONG VERSIONS)
 # ==========================================
-def build_docx_report(data: dict) -> io.BytesIO:
+def build_short_docx_report(data: dict) -> io.BytesIO:
     doc = Document()
     title = doc.add_heading(level=0)
-    run_t = title.add_run(f"{APP_NAME} — Methodological Evaluation")
+    run_t = title.add_run(f"{APP_NAME} — Short Version")
     run_t.font.size = Pt(20)
     run_t.font.bold = True
     run_t.font.color.rgb = RGBColor(120, 187, 166)
@@ -1691,7 +1731,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
     return buf
 
 
-def build_pdf_report(data: dict) -> io.BytesIO:
+def build_short_pdf_report(data: dict) -> io.BytesIO:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -1716,7 +1756,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     quote_style = ParagraphStyle("Q", parent=body_style, fontSize=7.5, leading=9.5, textColor=colors.HexColor("#555555"), fontName="Helvetica-Oblique")
 
     story = [
-        Paragraph(f"{APP_NAME} — Clinical Evidence Appraisal", title_style),
+        Paragraph(f"{APP_NAME} — Short Version", title_style),
         Spacer(1, 4),
     ]
 
@@ -1889,7 +1929,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     return buf
 
 
-def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
+def build_long_pdf_report(base_data: dict, long_data: dict) -> io.BytesIO:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -1915,14 +1955,14 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     header_style = ParagraphStyle("DDH", parent=body_style, fontName="Helvetica-Bold", textColor=colors.white)
 
     story = [
-        Paragraph(f"{APP_NAME} — Publication-Grade Forensic Critical Appraisal", title_style),
-        Paragraph("Comprehensive Methodological Autopsy, Explicit Arithmetic Derivations & Bias Analysis", sub_title),
+        Paragraph(f"{APP_NAME} — Long Version", title_style),
+        Paragraph("Detailed Appraisal, Full Score Calculations & Study Breakdown", sub_title),
         Spacer(1, 4),
     ]
 
     harvard_authors = format_harvard_authors(base_data.get("authors", "Not Specified"), max_authors=3)
     explicit_score = extract_explicit_score_from_data(base_data)
-    arith = deep_dive.get("arithmetic_breakdown", {})
+    arith = long_data.get("arithmetic_breakdown", {})
     calc_tally = arith.get("final_tally") or explicit_score
     acronym, full_name, purpose, scoring_rules, score_interpretation, scoring_guide = resolve_tool_scoring_guide(base_data)
 
@@ -1941,12 +1981,12 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(t_meta)
     story.append(Spacer(1, 8))
 
-    story.append(Paragraph("<b>1. Methodological Tool Selection & Algorithmic Rejection Rationale</b>", sec_heading))
-    rationale = deep_dive.get("tool_selection_rationale", {})
+    story.append(Paragraph("<b>1. Why This Tool Was Chosen (And Others Rejected)</b>", sec_heading))
+    rationale = long_data.get("tool_selection_rationale", {})
     t_rat_data = [
-        [Paragraph("<b>Mandated Framework:</b>", bold_style), Paragraph(f"<b>{rationale.get('assigned_tool', acronym)}</b> ({rationale.get('architecture_classification', base_data.get('study_design'))})", body_style)],
-        [Paragraph("<b>Selection Justification:</b>", bold_style), Paragraph(rationale.get("selection_justification", "N/A"), body_style)],
-        [Paragraph("<b>Alternative Tools Rejected & Decision Rule:</b>", bold_style), Paragraph(rationale.get("competing_tools_rejected", "N/A"), body_style)],
+        [Paragraph("<b>Tool Used:</b>", bold_style), Paragraph(f"<b>{rationale.get('assigned_tool', acronym)}</b> ({rationale.get('architecture_classification', base_data.get('study_design'))})", body_style)],
+        [Paragraph("<b>Why It Fits:</b>", bold_style), Paragraph(rationale.get("selection_justification", "N/A"), body_style)],
+        [Paragraph("<b>Why Other Tools Were Rejected:</b>", bold_style), Paragraph(rationale.get("competing_tools_rejected", "N/A"), body_style)],
     ]
     t_rat = Table(t_rat_data, colWidths=[1.8 * inch, 5.6 * inch])
     t_rat.setStyle(TableStyle([
@@ -1961,19 +2001,19 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(t_rat)
     story.append(Spacer(1, 8))
 
-    story.append(Paragraph("<b>2. Scoring Mechanics, Arithmetic Derivations & Quality Thresholds</b>", sec_heading))
-    scoring_system = deep_dive.get("scoring_system_breakdown", {})
+    story.append(Paragraph("<b>2. Scoring System & Step-by-Step Math</b>", sec_heading))
+    scoring_system = long_data.get("scoring_system_breakdown", {})
     individual_meanings = scoring_system.get("individual_score_meanings") or score_interpretation
     how_awarded = scoring_system.get("how_scores_are_awarded") or scoring_guide
     thresholds = scoring_system.get("quality_thresholds") or scoring_rules
 
     arith_rows = [
-        [Paragraph("<b>Individual Score Meaning:</b>", bold_style), Paragraph(individual_meanings, body_style)],
-        [Paragraph("<b>Aggregation & Logic:</b>", bold_style), Paragraph(how_awarded, body_style)],
-        [Paragraph("<b>Quality Thresholds:</b>", bold_style), Paragraph(thresholds, body_style)],
-        [Paragraph("<b>Mathematical Formula / Rule:</b>", bold_style), Paragraph(arith.get("formula_used", "N/A"), body_style)],
-        [Paragraph("<b>Step-by-Step Derivation:</b>", bold_style), Paragraph(arith.get("step_by_step_calculation", "N/A"), body_style)],
-        [Paragraph("<b>Final Calculated Score / Tally:</b>", bold_style), Paragraph(f"<font color='#1D3B32'><b>{calc_tally}</b></font>", bold_style)],
+        [Paragraph("<b>What Each Score Means:</b>", bold_style), Paragraph(individual_meanings, body_style)],
+        [Paragraph("<b>How Points Are Added:</b>", bold_style), Paragraph(how_awarded, body_style)],
+        [Paragraph("<b>Quality Cutoffs:</b>", bold_style), Paragraph(thresholds, body_style)],
+        [Paragraph("<b>Formula / Rule:</b>", bold_style), Paragraph(arith.get("formula_used", "N/A"), body_style)],
+        [Paragraph("<b>Step-by-Step Calculation:</b>", bold_style), Paragraph(arith.get("step_by_step_calculation", "N/A"), body_style)],
+        [Paragraph("<b>Final Score:</b>", bold_style), Paragraph(f"<font color='#1D3B32'><b>{calc_tally}</b></font>", bold_style)],
     ]
     t_arith = Table(arith_rows, colWidths=[1.8 * inch, 5.6 * inch])
     t_arith.setStyle(TableStyle([
@@ -1988,9 +2028,9 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(t_arith)
     story.append(Spacer(1, 8))
 
-    story.append(Paragraph("<b>3. Substantive Content Criticisms & Methodological Vulnerabilities</b>", sec_heading))
-    crit_rows = [[Paragraph("Identified Deficit & Mechanism", header_style), Paragraph("Manuscript Empirical Data / Line Citations", header_style), Paragraph("Scientific & Epidemiological Threat", header_style)]]
-    for c in deep_dive.get("substantive_criticisms", []):
+    story.append(Paragraph("<b>3. Main Weaknesses & Criticisms</b>", sec_heading))
+    crit_rows = [[Paragraph("Weakness", header_style), Paragraph("Evidence from the Paper", header_style), Paragraph("Why It Matters", header_style)]]
+    for c in long_data.get("substantive_criticisms", []):
         crit_rows.append([
             Paragraph(f"<b>{c.get('flaw_title')}</b>", bold_style),
             Paragraph(c.get("manuscript_evidence", ""), body_style),
@@ -2010,9 +2050,9 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(t_crit)
     story.append(Spacer(1, 8))
 
-    story.append(Paragraph("<b>4. Domain-by-Domain Forensic Audit (Boilerplate-Free)</b>", sec_heading))
-    d_rows = [[Paragraph("Domain Evaluated", header_style), Paragraph("Score", header_style), Paragraph("Direct Empirical Finding in Manuscript", header_style), Paragraph("Identified Design / Statistical Vulnerability", header_style)]]
-    for d in deep_dive.get("domain_deep_dives", []):
+    story.append(Paragraph("<b>4. Detailed Domain Breakdown</b>", sec_heading))
+    d_rows = [[Paragraph("Domain", header_style), Paragraph("Score", header_style), Paragraph("What Was Found in the Paper", header_style), Paragraph("Design or Statistical Issue", header_style)]]
+    for d in long_data.get("domain_deep_dives", []):
         d_rows.append([
             Paragraph(f"<b>{d.get('domain_name')}</b>", bold_style),
             Paragraph(d.get("score_awarded", ""), bold_style),
@@ -2033,10 +2073,10 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(t_d)
     story.append(Spacer(1, 8))
 
-    adv = deep_dive.get("translational_verdict_and_advisory", "")
+    adv = long_data.get("translational_verdict_and_advisory", "")
     if adv:
-        story.append(Paragraph("<b>5. Translational Clinical Advisory & Adoption Verdict</b>", sec_heading))
-        t_adv = Table([[Paragraph(f"<b>Clinical Adoption Recommendation:</b> {adv}", body_style)]], colWidths=[7.4 * inch])
+        story.append(Paragraph("<b>5. Bottom-Line Takeaway for Practice</b>", sec_heading))
+        t_adv = Table([[Paragraph(f"<b>Practice Recommendation:</b> {adv}", body_style)]], colWidths=[7.4 * inch])
         t_adv.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#EBF5F2')),
             ('BOX', (0, 0), (-1, -1), 1.2, colors.HexColor('#78BBA6')),
@@ -2050,53 +2090,53 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     return buf
 
 
-def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
+def build_long_docx_report(base_data: dict, long_data: dict) -> io.BytesIO:
     doc = Document()
     title = doc.add_heading(level=0)
-    run_t = title.add_run(f"{APP_NAME} — Publication-Grade Forensic Critical Appraisal")
+    run_t = title.add_run(f"{APP_NAME} — Long Version")
     run_t.font.size = Pt(18)
     run_t.font.bold = True
     run_t.font.color.rgb = RGBColor(44, 82, 71)
 
     harvard_authors = format_harvard_authors(base_data.get("authors", "Not Specified"), max_authors=3)
     explicit_score = extract_explicit_score_from_data(base_data)
-    arith = deep_dive.get("arithmetic_breakdown", {})
+    arith = long_data.get("arithmetic_breakdown", {})
     calc_tally = arith.get("final_tally") or explicit_score
     acronym, full_name, purpose, scoring_rules, score_interpretation, scoring_guide = resolve_tool_scoring_guide(base_data)
 
     p_meta = doc.add_paragraph()
     p_meta.add_run("Evaluated Manuscript: ").bold = True
     p_meta.add_run(f"{base_data.get('paper_title')} ({harvard_authors}, {base_data.get('year_published')})\n")
-    p_meta.add_run(f"Architecture: {base_data.get('study_design')} | Gold-Standard Tool: {full_name} ({acronym})\n")
-    p_meta.add_run(f"Verified Tool Score / Tally: {calc_tally}").bold = True
+    p_meta.add_run(f"Architecture: {base_data.get('study_design')} | Tool: {full_name} ({acronym})\n")
+    p_meta.add_run(f"Verified Score: {calc_tally}").bold = True
 
-    doc.add_heading("1. Methodological Tool Selection & Comparative Justification", level=1)
-    rat = deep_dive.get("tool_selection_rationale", {})
-    doc.add_paragraph(f"Mandated Tool: {rat.get('assigned_tool', acronym)} ({rat.get('architecture_classification', base_data.get('study_design'))})")
-    doc.add_paragraph(f"Selection Justification:\n{rat.get('selection_justification')}")
-    doc.add_paragraph(f"Alternative Frameworks Rejected & Algorithmic Rules:\n{rat.get('competing_tools_rejected')}")
+    doc.add_heading("1. Why This Tool Was Chosen (And Others Rejected)", level=1)
+    rat = long_data.get("tool_selection_rationale", {})
+    doc.add_paragraph(f"Tool Used: {rat.get('assigned_tool', acronym)} ({rat.get('architecture_classification', base_data.get('study_design'))})")
+    doc.add_paragraph(f"Why It Fits:\n{rat.get('selection_justification')}")
+    doc.add_paragraph(f"Why Other Tools Were Rejected:\n{rat.get('competing_tools_rejected')}")
 
-    doc.add_heading("2. Scoring Mechanics, Mathematical Derivations & Score Interpretation", level=1)
-    scoring_system = deep_dive.get("scoring_system_breakdown", {})
-    doc.add_paragraph(f"Meaning of Individual Domain Scores:\n{scoring_system.get('individual_score_meanings', score_interpretation)}")
-    doc.add_paragraph(f"Aggregation & Logic:\n{scoring_system.get('how_scores_are_awarded', scoring_guide)}")
-    doc.add_paragraph(f"Quality Thresholds:\n{scoring_system.get('quality_thresholds', scoring_rules)}")
-    doc.add_paragraph(f"Formula / Decision Gate: {arith.get('formula_used', 'N/A')}")
-    doc.add_paragraph(f"Step-by-Step Arithmetic Calculation:\n{arith.get('step_by_step_calculation', 'N/A')}")
+    doc.add_heading("2. Scoring System & Step-by-Step Math", level=1)
+    scoring_system = long_data.get("scoring_system_breakdown", {})
+    doc.add_paragraph(f"What Each Score Means:\n{scoring_system.get('individual_score_meanings', score_interpretation)}")
+    doc.add_paragraph(f"How Points Are Added:\n{scoring_system.get('how_scores_are_awarded', scoring_guide)}")
+    doc.add_paragraph(f"Quality Cutoffs:\n{scoring_system.get('quality_thresholds', scoring_rules)}")
+    doc.add_paragraph(f"Formula / Rule: {arith.get('formula_used', 'N/A')}")
+    doc.add_paragraph(f"Step-by-Step Calculation:\n{arith.get('step_by_step_calculation', 'N/A')}")
     p_fin = doc.add_paragraph()
-    p_fin.add_run(f"Final Calculated Score / Tally: {calc_tally}").bold = True
+    p_fin.add_run(f"Final Score: {calc_tally}").bold = True
 
-    doc.add_heading("3. Substantive Content Criticisms & Flaw Analysis", level=1)
-    for idx, c in enumerate(deep_dive.get("substantive_criticisms", []), 1):
+    doc.add_heading("3. Main Weaknesses & Criticisms", level=1)
+    for idx, c in enumerate(long_data.get("substantive_criticisms", []), 1):
         p_c = doc.add_paragraph(style='List Bullet')
         p_c.add_run(f"{idx}. {c.get('flaw_title')}: ").bold = True
         p_c.add_run(f"{c.get('manuscript_evidence')}\n")
-        p_c.add_run(f"Epidemiological Threat: {c.get('epidemiological_impact')}")
+        p_c.add_run(f"Why It Matters: {c.get('epidemiological_impact')}")
 
-    doc.add_heading("4. Domain-by-Domain Forensic Audit (Boilerplate-Free)", level=1)
+    doc.add_heading("4. Detailed Domain Breakdown", level=1)
     table = doc.add_table(rows=1, cols=4)
     table.style = "Table Grid"
-    headers = ["Domain", "Score", "Direct Manuscript Finding", "Methodological Vulnerability"]
+    headers = ["Domain", "Score", "What Was Found in the Paper", "Design or Statistical Issue"]
     for i, h in enumerate(headers):
         cell = table.rows[0].cells[i]
         shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="78BBA6"/>')
@@ -2105,16 +2145,16 @@ def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
         r.bold = True
         r.font.color.rgb = RGBColor(255, 255, 255)
 
-    for d in deep_dive.get("domain_deep_dives", []):
+    for d in long_data.get("domain_deep_dives", []):
         row = table.add_row().cells
         row[0].paragraphs[0].add_run(d.get("domain_name", "")).bold = True
         row[1].paragraphs[0].add_run(d.get("score_awarded", ""))
         row[2].paragraphs[0].add_run(d.get("direct_empirical_finding", ""))
         row[3].paragraphs[0].add_run(d.get("statistical_or_design_flaw", ""))
 
-    adv = deep_dive.get("translational_verdict_and_advisory", "")
+    adv = long_data.get("translational_verdict_and_advisory", "")
     if adv:
-        doc.add_heading("5. Translational Clinical Advisory & Adoption Verdict", level=1)
+        doc.add_heading("5. Bottom-Line Takeaway for Practice", level=1)
         doc.add_paragraph(adv)
 
     buf = io.BytesIO()
@@ -2125,6 +2165,7 @@ def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
 
 def answer_interrogation_query(
     client: genai.Client,
+    api_key_str: str,
     query: str,
     appraisal_json: dict,
     raw_manuscript_text: str,
@@ -2132,8 +2173,8 @@ def answer_interrogation_query(
 ) -> str:
     history_context = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in chat_history[-6:]])
     chat_instruction = f"""
-    You are {ASSISTANT_NAME}, an objective methodological audit and interrogation assistant for the Kitique Appraisal Tool.
-    Answer user queries regarding the appraisal report and source manuscript in simple, direct, academically grounded language.
+    You are {ASSISTANT_NAME}, a helpful and clear assistant for the Kitique Appraisal Tool.
+    Answer user questions about the appraisal report and source manuscript in simple, direct language.
     Cite specific lines, sections, and quotes clearly.
 
     APPRAISAL JSON:
@@ -2142,7 +2183,7 @@ def answer_interrogation_query(
     SOURCE TEXT:
     {raw_manuscript_text[:20000]}
     """
-    for model_name in FREE_ACTIVE_MODELS:
+    for model_name in get_active_models(api_key_str):
         try:
             response = client.models.generate_content(
                 model=model_name,
@@ -2152,7 +2193,7 @@ def answer_interrogation_query(
             return response.text
         except Exception:
             continue
-    return f"Failed to query {ASSISTANT_NAME} across active models."
+    return f"Failed to reach {ASSISTANT_NAME} across active models."
 
 
 # ==========================================
@@ -2201,7 +2242,7 @@ if not st.session_state["authenticated"]:
             st.error("Invalid passcode.")
 else:
     st.title(f"🐱 {APP_NAME}")
-    st.caption("Epidemiological Critical Appraisal & Hierarchical Consistency Auditor")
+    st.caption("Critical Appraisal & Study Design Verification Tool")
 
     api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None))
 
@@ -2211,8 +2252,8 @@ else:
         st.session_state["chat_history"] = []
     if "raw_paper_text" not in st.session_state:
         st.session_state["raw_paper_text"] = ""
-    if "deep_dive_data" not in st.session_state:
-        st.session_state["deep_dive_data"] = None
+    if "long_version_data" not in st.session_state:
+        st.session_state["long_version_data"] = None
 
     with st.sidebar:
         st.header("⚙️ Configuration")
@@ -2221,9 +2262,13 @@ else:
         else:
             st.success("Access Credential Active")
 
+        if api_key:
+            active_m = get_active_models(api_key)
+            st.caption(f"⚡ Active Models: `{', '.join(active_m[:3])}`")
+
         strictness_choice = st.radio(
-            "Adjudication Strictness:",
-            options=["Strict (Zero Benefit of Doubt)", "Auditor / Forensic (Zero Tolerance)"],
+            "Grading Strictness:",
+            options=["Strict (Standard)", "Extra Strict (Zero Tolerance)"],
             index=0,
         )
 
@@ -2244,7 +2289,7 @@ else:
                 with c_load:
                     if st.button("Load", key=f"v_{r['id']}", use_container_width=True):
                         st.session_state["appraisal_data"] = get_appraisal_by_id(r["id"])
-                        st.session_state["deep_dive_data"] = None
+                        st.session_state["long_version_data"] = None
                         st.session_state["chat_history"] = []
                         st.rerun()
                 with c_del:
@@ -2273,7 +2318,7 @@ else:
         if uploaded:
             raw_pdf_bytes = uploaded.read()
             filename_tag = uploaded.name
-            with st.spinner("Extracting text & isolating structural sections..."):
+            with st.spinner("Extracting text & isolating sections..."):
                 paper_text = extract_text_from_pdf_bytes(raw_pdf_bytes)
             if paper_text:
                 st.session_state["raw_paper_text"] = paper_text
@@ -2303,7 +2348,7 @@ else:
 
     if paper_text:
         client_preflight = genai.Client(api_key=api_key) if api_key else None
-        self_audit_report = run_framework_consistency_auditor(paper_text, client_preflight, available_designs)
+        self_audit_report = run_framework_consistency_auditor(paper_text, client_preflight, api_key or "", available_designs)
         ensemble_winner = self_audit_report["design"]
         confidence_score = self_audit_report["confidence"]
 
@@ -2317,49 +2362,49 @@ else:
             else (len(available_designs) - 1)
         )
         selected_design = st.selectbox(
-            "Target Study Architecture & Framework:",
+            "Target Study Design & Tool:",
             options=available_designs,
             index=default_idx,
         )
     with col_d2:
         conf_badge = f"{int(confidence_score * 100)}%"
-        st.metric("Consistency Confidence", conf_badge)
+        st.metric("Match Confidence", conf_badge)
 
     can_proceed = True
 
     if self_audit_report:
-        with st.expander(f"🛡️ Framework Consistency Auditor — {self_audit_report.get('status', 'Verified')}"):
-            st.markdown(f"**Assigned Design:** `{self_audit_report.get('design')}` | **Mandated Tool:** `{self_audit_report.get('tool')}`")
-            st.markdown(f"- **Classifier A (Hierarchical / Section Engine):** {self_audit_report.get('classifier_a_rule_engine')}")
-            st.markdown(f"- **Classifier B (Constrained LLM):** {self_audit_report.get('classifier_b_llm')}")
-            st.markdown("**Classification Decision Tree:**")
+        with st.expander(f"🛡️ Study Design & Tool Check — {self_audit_report.get('status', 'Verified')}"):
+            st.markdown(f"**Assigned Design:** `{self_audit_report.get('design')}` | **Tool:** `{self_audit_report.get('tool')}`")
+            st.markdown(f"- **Rule Engine:** {self_audit_report.get('classifier_a_rule_engine')}")
+            st.markdown(f"- **AI Verifier:** {self_audit_report.get('classifier_b_llm')}")
+            st.markdown("**Why This Was Chosen:**")
             for step in self_audit_report.get("decision_tree", []):
                 st.markdown(f"  - ✅ {step}")
-            st.markdown("**Excluded Alternatives:**")
+            st.markdown("**Why Other Tools Were Excluded:**")
             for ex in self_audit_report.get("excluded_alternatives", []):
                 st.markdown(f"  - ❌ {ex}")
 
-        with st.expander("🔍 Classification & Section Parser Debug View"):
+        with st.expander("🔍 Section Parser Debug View"):
             prev = self_audit_report.get("sections_preview", {})
-            st.markdown("**Heuristic Probable Title Detected:**")
+            st.markdown("**Detected Title:**")
             st.code(prev.get("detected_title", "N/A"))
-            st.markdown("**Isolated Title Zone (Top 500 chars):**")
+            st.markdown("**Title Zone (Top 500 chars):**")
             st.code(prev.get("title_zone", "N/A"))
-            st.markdown("**Isolated Abstract Zone (Top 500 chars):**")
+            st.markdown("**Abstract Zone (Top 500 chars):**")
             st.code(prev.get("abstract_zone", "N/A"))
-            st.markdown("**Isolated Methods Zone (Top 500 chars):**")
+            st.markdown("**Methods Zone (Top 500 chars):**")
             st.code(prev.get("methods_zone", "N/A"))
 
         if self_audit_report.get("requires_human_confirmation"):
             st.warning(
-                f"⚠️ **Low Confidence Margin or Classifier Split ({int(confidence_score * 100)}%):**\n\n"
+                f"⚠️ **Close Call Detected ({int(confidence_score * 100)}%):**\n\n"
                 f"- **Rule Engine:** `{self_audit_report.get('design')}`\n"
-                f"- **LLM Classifier:** `{self_audit_report.get('classifier_b_llm')}`\n\n"
-                f"Please verify the dropdown above and check the box below to unlock execution."
+                f"- **AI Verifier:** `{self_audit_report.get('classifier_b_llm')}`\n\n"
+                f"Please check the dropdown above and tick the box below to continue."
             )
-            can_proceed = st.checkbox("I have verified the selected Target Study Architecture above.", value=False)
+            can_proceed = st.checkbox("I have checked the selected Study Design above.", value=False)
 
-    if st.button("⚡ Run Methodological Appraisal", type="primary", use_container_width=True, disabled=not can_proceed):
+    if st.button("⚡ Run Appraisal", type="primary", use_container_width=True, disabled=not can_proceed):
         if not api_key:
             st.warning("Enter access key in sidebar.")
         elif not paper_text and not raw_pdf_bytes:
@@ -2369,9 +2414,9 @@ else:
             target_design = selected_design
 
             if target_design == "🔍 Auto-Detect & Discover Tool (If not in list)":
-                with st.spinner("Discovering best appraisal tool..."):
+                with st.spinner("Finding best appraisal tool..."):
                     try:
-                        discovered_name, discovered_tool = discover_appraisal_tool(client, paper_text or "Excerpt")
+                        discovered_name, discovered_tool = discover_appraisal_tool(client, api_key, paper_text or "Excerpt")
                         save_discovered_tool(discovered_name, discovered_tool)
                         target_design = discovered_name
                         active_tools = get_all_tools()
@@ -2379,10 +2424,11 @@ else:
                     except Exception:
                         target_design = "Observational Study (Cohort)"
 
-            with st.spinner(f"Executing appraisal & verifying framework consistency under {target_design}..."):
+            with st.spinner(f"Running appraisal under {target_design}..."):
                 try:
                     raw_data = execute_manuscript_evaluation(
                         client,
+                        api_key_str=api_key,
                         text_content=paper_text,
                         raw_pdf_bytes=raw_pdf_bytes if not paper_text else None,
                         assigned_design=target_design,
@@ -2393,12 +2439,12 @@ else:
                     verified_data, score, _, flaw_warns = run_comprehensive_checksum(raw_data, paper_text)
                     new_id = save_appraisal(verified_data, filename_tag)
                     st.session_state["appraisal_data"] = verified_data
-                    st.session_state["deep_dive_data"] = None
+                    st.session_state["long_version_data"] = None
                     st.session_state["chat_history"] = []
-                    st.success(f"Verified by Framework Consistency Auditor and saved (ID: #{new_id})")
+                    st.success(f"Appraisal complete and saved (ID: #{new_id})")
                     st.rerun()
                 except ClassificationConsistencyError as ce:
-                    st.error(f"🛑 **Framework Consistency Auditor Blocked Report Generation (Hard Fail):**\n\n{ce}")
+                    st.error(f"🛑 **Appraisal Stopped Due to Tool Mismatch:**\n\n{ce}")
                 except Exception as e:
                     st.error(f"Execution error: {e}")
 
@@ -2415,17 +2461,17 @@ else:
 
         auditor_warns = data.get("audit_log", {}).get("consistency_auditor_warnings", [])
         for w in auditor_warns:
-            st.warning(f"⚠️ **Auditor Advisory:** {w}")
+            st.warning(f"⚠️ **Note:** {w}")
 
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            st.metric("Architecture", data.get("study_design"))
+            st.metric("Study Design", data.get("study_design"))
         with c2:
-            st.metric("Tool Applied", data.get("appraisal_tool_selected"))
+            st.metric("Tool Used", data.get("appraisal_tool_selected"))
         with c3:
             st.metric("Methodology Quality", ratings.get("methodology_quality", "N/A"))
         with c4:
-            st.metric("Groundedness", f"{data.get('groundedness_score', 0.0)}%")
+            st.metric("Quote Match", f"{data.get('groundedness_score', 0.0)}%")
 
         nos_stars = data.get("nos_score_breakdown")
         if nos_stars and "total_stars" in nos_stars and nos_stars["total_stars"] > 0:
@@ -2439,7 +2485,7 @@ else:
 
         story_arc = data.get("narrative_arc_summary", [])
         if story_arc:
-            st.markdown("### 📖 Narrative Story Arc & Translational Journey")
+            st.markdown("### 📖 Story Summary of the Paper")
             with st.container():
                 for idx, pt in enumerate(story_arc, 1):
                     parts = pt.split(":", 1)
@@ -2457,15 +2503,15 @@ else:
                     "Score": d.get("rating"),
                     "Reference": d.get("location_reference"),
                     "Quote": d.get("verbatim_evidence"),
-                    "Grounding Status": d.get("checksum_status", "Verified"),
-                    "Assessment Critique": d.get("critique"),
+                    "Match Check": d.get("checksum_status", "Verified"),
+                    "Critique": d.get("critique"),
                 }
                 for d in data.get("domain_appraisals", [])
             ],
             use_container_width=True,
         )
 
-        st.subheader("📝 Methodological Synthesis & Discussion (Plain-English Points)")
+        st.subheader("📝 Methodological Synthesis & Discussion (Key Points)")
         synth = data.get("overall_synthesis", [])
         if isinstance(synth, list):
             for idx, pt in enumerate(synth, 1):
@@ -2477,94 +2523,96 @@ else:
         else:
             st.info(str(synth))
 
+        # --- SHORT VERSION DOWNLOADS ---
+        st.markdown("#### 📄 Short Version Downloads")
         c_doc, c_pdf, c_log = st.columns(3)
         with c_doc:
             st.download_button(
-                "📥 Download Executive Word (.docx)",
-                data=build_docx_report(data),
-                file_name=format_harvard_filename(data, "docx"),
+                "📥 Download Short Version (.docx)",
+                data=build_short_docx_report(data),
+                file_name=format_harvard_filename(data, "docx", tag="Short"),
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 use_container_width=True,
             )
         with c_pdf:
             st.download_button(
-                "📥 Download Executive PDF (.pdf)",
-                data=build_pdf_report(data),
-                file_name=format_harvard_filename(data, "pdf"),
+                "📥 Download Short Version (.pdf)",
+                data=build_short_pdf_report(data),
+                file_name=format_harvard_filename(data, "pdf", tag="Short"),
                 mime="application/pdf",
                 use_container_width=True,
             )
         with c_log:
             audit_payload = json.dumps(data, indent=2)
             st.download_button(
-                "📥 Download Self-Audit Log (.json)",
+                "📥 Download Raw Data (.json)",
                 data=audit_payload,
-                file_name=format_harvard_filename(data, "json"),
+                file_name=format_harvard_filename(data, "json", tag="Data"),
                 mime="application/json",
                 use_container_width=True,
             )
 
-        # --- ADVANCED PUBLICATION-GRADE FORENSIC DEEP-DIVE ---
+        # --- LONG VERSION SECTION ---
         st.markdown("---")
-        st.subheader("🔬 Publication-Grade Forensic Deep-Dive")
-        st.caption("Generates a full peer-review autopsy: tool selection comparative rationale, explicit arithmetic derivations, zero generic boilerplate, and 2–3 substantive content critiques (Seafoam/Green Themed).")
+        st.subheader("📚 Long Version (Full Breakdown & Math)")
+        st.caption("Generates the extended version with full step-by-step score math, why this tool was picked over others, and 2–3 main study criticisms.")
 
-        if st.button("Generate Forensic Deep-Dive Report", type="secondary"):
+        if st.button("Generate Long Version", type="secondary"):
             if not api_key:
                 st.error("Access key required.")
             else:
                 client = genai.Client(api_key=api_key)
-                with st.spinner("Executing rigorous mathematical and methodological deep-dive..."):
+                with st.spinner("Generating Long Version..."):
                     try:
-                        deep_dive_res = generate_forensic_deep_dive(client, data, st.session_state.get("raw_paper_text", ""))
-                        st.session_state["deep_dive_data"] = deep_dive_res
-                        st.success("Publication-grade forensic deep-dive generated.")
+                        long_res = generate_long_version(client, api_key, data, st.session_state.get("raw_paper_text", ""))
+                        st.session_state["long_version_data"] = long_res
+                        st.success("Long Version ready!")
                         st.rerun()
                     except Exception as err:
-                        st.error(f"Error generating deep-dive: {err}")
+                        st.error(f"Error generating Long Version: {err}")
 
-        if st.session_state.get("deep_dive_data"):
-            dd = st.session_state["deep_dive_data"]
+        if st.session_state.get("long_version_data"):
+            lv = st.session_state["long_version_data"]
             with st.container():
-                st.markdown("#### ⚖️ Methodological Tool Selection Rationale & Rejection Rules")
-                rat = dd.get("tool_selection_rationale", {})
-                st.markdown(f"**Mandated Instrument:** `{rat.get('assigned_tool', 'N/A')}`")
+                st.markdown("#### ⚖️ Why This Tool Was Chosen (And Others Rejected)")
+                rat = lv.get("tool_selection_rationale", {})
+                st.markdown(f"**Tool Used:** `{rat.get('assigned_tool', 'N/A')}`")
                 st.write(rat.get("selection_justification", "N/A"))
-                with st.expander("Comparative Framework Analysis & Rejection Decision Algorithm"):
+                with st.expander("See why other tools were rejected"):
                     st.write(rat.get("competing_tools_rejected", "N/A"))
 
-                st.markdown("#### 🧮 Individual Score Interpretations & Arithmetic Derivations")
-                scoring_system = dd.get("scoring_system_breakdown", {})
-                st.write(f"**Meaning of Score Levels:**\n{scoring_system.get('individual_score_meanings', 'N/A')}")
-                st.write(f"**Aggregation Logic:**\n{scoring_system.get('how_scores_are_awarded', 'N/A')}")
-                st.write(f"**Quality Thresholds:**\n{scoring_system.get('quality_thresholds', 'N/A')}")
+                st.markdown("#### 🧮 Score Meaning & Step-by-Step Math")
+                scoring_system = lv.get("scoring_system_breakdown", {})
+                st.write(f"**What Each Score Means:**\n{scoring_system.get('individual_score_meanings', 'N/A')}")
+                st.write(f"**How Points Are Added:**\n{scoring_system.get('how_scores_are_awarded', 'N/A')}")
+                st.write(f"**Quality Cutoffs:**\n{scoring_system.get('quality_thresholds', 'N/A')}")
 
-                arith = dd.get("arithmetic_breakdown", {})
-                st.info(f"**Mathematical Rule / Equation:** {arith.get('formula_used', 'N/A')}\n\n**Step-by-Step Calculation:**\n{arith.get('step_by_step_calculation', 'N/A')}\n\n**Final Result:** {arith.get('final_tally', 'N/A')}")
+                arith = lv.get("arithmetic_breakdown", {})
+                st.info(f"**Formula / Rule:** {arith.get('formula_used', 'N/A')}\n\n**Step-by-Step Calculation:**\n{arith.get('step_by_step_calculation', 'N/A')}\n\n**Final Score:** {arith.get('final_tally', 'N/A')}")
 
-                st.markdown("#### ⚠️ Substantive Content Criticisms")
-                for c in dd.get("substantive_criticisms", []):
-                    st.error(f"**{c.get('flaw_title')}:** {c.get('manuscript_evidence')}\n\n*Epidemiological Threat:* {c.get('epidemiological_impact')}")
+                st.markdown("#### ⚠️ Main Weaknesses & Criticisms")
+                for c in lv.get("substantive_criticisms", []):
+                    st.error(f"**{c.get('flaw_title')}:** {c.get('manuscript_evidence')}\n\n*Why it matters:* {c.get('epidemiological_impact')}")
 
-                adv = dd.get("translational_verdict_and_advisory", "")
+                adv = lv.get("translational_verdict_and_advisory", "")
                 if adv:
-                    st.markdown("#### 🎯 Translational Clinical Advisory")
-                    st.success(f"**Clinical Practice Recommendation:** {adv}")
+                    st.markdown("#### 🎯 Bottom-Line Takeaway for Practice")
+                    st.success(f"**Practice Recommendation:** {adv}")
 
-                c_dd_doc, c_dd_pdf = st.columns(2)
-                with c_dd_doc:
+                c_lv_doc, c_lv_pdf = st.columns(2)
+                with c_lv_doc:
                     st.download_button(
-                        "📥 Download Forensic Deep-Dive (.docx)",
-                        data=build_deep_dive_docx_report(data, dd),
-                        file_name=format_harvard_filename(data, "docx", tag="Forensic_Audit"),
+                        "📥 Download Long Version (.docx)",
+                        data=build_long_docx_report(data, lv),
+                        file_name=format_harvard_filename(data, "docx", tag="Long"),
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         use_container_width=True,
                     )
-                with c_dd_pdf:
+                with c_lv_pdf:
                     st.download_button(
-                        "📥 Download Forensic Deep-Dive (.pdf)",
-                        data=build_deep_dive_pdf_report(data, dd),
-                        file_name=format_harvard_filename(data, "pdf", tag="Forensic_Audit"),
+                        "📥 Download Long Version (.pdf)",
+                        data=build_long_pdf_report(data, lv),
+                        file_name=format_harvard_filename(data, "pdf", tag="Long"),
                         mime="application/pdf",
                         use_container_width=True,
                     )
@@ -2585,10 +2633,10 @@ else:
 
                 client = genai.Client(api_key=api_key)
                 with st.chat_message("assistant"):
-                    with st.spinner(f"Consulting {ASSISTANT_NAME}..."):
+                    with st.spinner(f"Asking {ASSISTANT_NAME}..."):
                         try:
                             reply = answer_interrogation_query(
-                                client, query, data, st.session_state.get("raw_paper_text", ""), st.session_state["chat_history"]
+                                client, api_key, query, data, st.session_state.get("raw_paper_text", ""), st.session_state["chat_history"]
                             )
                             st.markdown(reply)
                             st.session_state["chat_history"].append({"role": "assistant", "content": reply})
