@@ -10,8 +10,6 @@ from typing import Dict, List, Optional, Tuple
 
 from bs4 import BeautifulSoup
 from docx import Document
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from docx.shared import Pt, RGBColor
@@ -37,14 +35,18 @@ except ImportError:
 DB_NAME = "appraisals.db"
 APP_NAME = "Kitique Appraisal Tool"
 ASSISTANT_NAME = "Ki's Assistant"
+MIN_CONFIDENCE_MARGIN = 15
 
 FREE_ACTIVE_MODELS = [
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
     "gemini-1.5-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.8-flash",
 ]
+
+
+class ClassificationConsistencyError(Exception):
+    """Raised ONLY on objective, impossible structural contradictions (Hard Fails)."""
+    pass
 
 
 def get_connection():
@@ -52,6 +54,92 @@ def get_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+
+# ==========================================
+# 1. LEGALITY MATRIX, SIGNATURES & TAXONOMY
+# ==========================================
+LEGAL_PAIRS = {
+    "Clinical Practice Guideline / Consensus Statement": ["AGREE II"],
+    "Systematic Review / Meta-Analysis": ["AMSTAR 2"],
+    "Narrative Review": ["SANRA"],
+    "Randomized Controlled Trial (RCT)": ["Cochrane RoB 2"],
+    "Non-Randomized Intervention / Quasi-Experimental": ["ROBINS-I"],
+    "Observational Study (Cohort)": ["Newcastle-Ottawa Scale (NOS) Cohort", "NOS"],
+    "Observational Study (Case-Control)": ["Newcastle-Ottawa Scale (NOS) Case-Control", "NOS"],
+    "Cross-Sectional Study": ["AXIS"],
+    "Diagnostic Accuracy Study": ["QUADAS-2"],
+    "Prediction Model Study": ["PROBAST"],
+    "Qualitative Study": ["CASP Qualitative / COREQ", "CASP"],
+}
+
+FRAMEWORK_SIGNATURES = {
+    "Clinical Practice Guideline / Consensus Statement": {
+        "source_must_have_any": [r"\brecommendation\s*\d+", r"\bconsensus\b", r"\bguideline\b", r"\bgrade\s+of\s+recommendation\b"],
+        "source_must_not_have": [r"\bpatients\s+were\s+randomized\s+to\b", r"\bwe\s+retrospectively\s+reviewed\s+the\s+medical\s+records\b"],
+        "expected_domain_keywords": ["scope", "stakeholder", "rigour", "clarity", "applicability", "editorial"],
+        "tool": "AGREE II"
+    },
+    "Systematic Review / Meta-Analysis": {
+        "source_must_have_any": [r"\bsearch\s+strategy\b", r"\bprisma\b", r"\bdatabases?\b", r"\bmeta-analysis\b", r"\bsystematic\s+review\b"],
+        "source_must_not_have": [r"\bgrade\s+of\s+recommendation\s+gpp\b", r"\bstrong\s+consensus\s+\(\d+%\s+agreement\)\b"],
+        "expected_domain_keywords": ["pico", "search", "duplicate", "excluded", "rob", "meta-analytic", "publication bias", "conflict"],
+        "tool": "AMSTAR 2"
+    },
+    "Narrative Review": {
+        "source_must_have_any": [r"\breview\b", r"\bliterature\b", r"\boverview\b"],
+        "source_must_not_have": [r"\bpatients\s+were\s+randomized\b"],
+        "expected_domain_keywords": ["justification", "aims", "search", "referencing", "reasoning", "presentation"],
+        "tool": "SANRA"
+    },
+    "Randomized Controlled Trial (RCT)": {
+        "source_must_have_any": [r"\brandomi[zs]ed\b", r"\ballocat(?:ed|ion)\b", r"\btrial\b", r"\bplacebo\b"],
+        "source_must_not_have": [r"\bsystematic\s+review\s+and\s+meta-analysis\b"],
+        "expected_domain_keywords": ["randomization", "deviations", "missing", "measurement", "selection"],
+        "tool": "Cochrane RoB 2"
+    },
+    "Non-Randomized Intervention / Quasi-Experimental": {
+        "source_must_have_any": [r"\bintervention\b", r"\bpatients\b", r"\btreated\b", r"\bgroup\b"],
+        "source_must_not_have": [r"\bprisma\s+flowchart\b"],
+        "expected_domain_keywords": ["confounding", "selection", "classification", "deviations", "missing", "measurement", "reported"],
+        "tool": "ROBINS-I"
+    },
+    "Observational Study (Cohort)": {
+        "source_must_have_any": [r"\bcohort\b", r"\bpatients\b", r"\bfollow-up\b", r"\bretrospective\b", r"\bprospective\b", r"\bconsecutive\b"],
+        "source_must_not_have": [r"\bgrade\s+of\s+recommendation\s+gpp\b"],
+        "expected_domain_keywords": ["selection", "comparability", "outcome"],
+        "tool": "Newcastle-Ottawa Scale (NOS) Cohort"
+    },
+    "Observational Study (Case-Control)": {
+        "source_must_have_any": [r"\bcases\b", r"\bcontrols\b", r"\bodds\s+ratio\b", r"\bcase-control\b"],
+        "source_must_not_have": [r"\bgrade\s+of\s+recommendation\s+gpp\b"],
+        "expected_domain_keywords": ["selection", "comparability", "exposure"],
+        "tool": "Newcastle-Ottawa Scale (NOS) Case-Control"
+    },
+    "Cross-Sectional Study": {
+        "source_must_have_any": [r"\bcross-sectional\b", r"\bsurvey\b", r"\bprevalence\b", r"\bquestionnaire\b"],
+        "source_must_not_have": [r"\brandomized\s+controlled\s+trial\b"],
+        "expected_domain_keywords": ["aims", "selection", "measurement", "confounding", "ethical"],
+        "tool": "AXIS"
+    },
+    "Prediction Model Study": {
+        "source_must_have_any": [r"\bmodel\b", r"\bpredict(?:ion|ors)\b", r"\bvalidation\b", r"\bauc\b", r"\bc-index\b", r"\bnomogram\b"],
+        "source_must_not_have": [r"\bconsensus\s+guideline\b"],
+        "expected_domain_keywords": ["participants", "predictors", "outcome", "analysis"],
+        "tool": "PROBAST"
+    },
+    "Diagnostic Accuracy Study": {
+        "source_must_have_any": [r"\bsensitivity\b", r"\bspecificity\b", r"\bindex\s+test\b", r"\breference\s+standard\b", r"\bdiagnostic\b"],
+        "source_must_not_have": [r"\bconsensus\s+guideline\b"],
+        "expected_domain_keywords": ["patient selection", "index test", "reference standard", "flow"],
+        "tool": "QUADAS-2"
+    },
+    "Qualitative Study": {
+        "source_must_have_any": [r"\bqualitative\b", r"\binterview\b", r"\bthematic\b", r"\bthemes\b", r"\bfocus\s+group\b"],
+        "source_must_not_have": [r"\brandomized\s+controlled\s+trial\b"],
+        "expected_domain_keywords": ["appropriateness", "sampling", "reflexivity", "ethical", "analysis", "findings"],
+        "tool": "CASP Qualitative / COREQ"
+    },
+}
 
 SEED_TAXONOMY = {
     "Systematic Review / Meta-Analysis": {
@@ -415,6 +503,9 @@ def delete_appraisal(appraisal_id: int):
         conn.commit()
 
 
+# ==========================================
+# 2. CROSSREF-STYLE HEURISTIC TITLE & SECTION PARSER
+# ==========================================
 def clean_pdf_artifacts(raw_text: str) -> str:
     cleaned = re.sub(r"(\w+)-\s*\n\s*(\w+)", r"\1\2", raw_text)
     cleaned = re.sub(r"(?i)\bpage\s+\d+\s+(?:of|\/)\s+\d+\b", "", cleaned)
@@ -438,6 +529,7 @@ def ocr_pdf(pdf_bytes: bytes) -> str:
         return ""
 
 
+@st.cache_data(show_spinner=False)
 def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     text = ""
     try:
@@ -459,9 +551,10 @@ def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     return clean_pdf_artifacts(text) if len(text.strip()) > 100 else ""
 
 
+@st.cache_data(show_spinner=False)
 def extract_text_from_url(raw_input: str) -> str:
     target = raw_input.strip()
-    if not target.startswith("http://") and not target.startswith("https://"):
+    if not target.startswith("http://) and not target.startswith("https://):
         if target.startswith("10.") or "/10." in target:
             clean_doi = target[target.find("10.") :]
             target = f"https://doi.org/{clean_doi}"
@@ -476,6 +569,112 @@ def extract_text_from_url(raw_input: str) -> str:
         elem.decompose()
     article = soup.find("article") or soup.find("main") or soup.body
     return article.get_text(separator="\n", strip=True) if article else ""
+
+
+def find_probable_title_and_header(text: str) -> Tuple[str, str]:
+    """
+    Crossref-inspired heuristic title detector.
+    Evaluates the top 45 lines of the document, penalizing publisher boilerplate
+    (Elsevier, ScienceDirect, DOI, ISSN, affiliations, emails) and rewarding
+    title-length lines and study-architecture keywords.
+    """
+    lines = [line.strip() for line in text[:4500].split("\n") if line.strip()]
+    top_lines = lines[:45]
+
+    boilerplate_patterns = re.compile(
+        r"(?i)(?:sciencedirect|elsevier|springer|wiley|contents\s+lists\s+available|"
+        r"journal\s+homepage|http://|https://|doi\.org|10\.\d{4}/|issn\s+\d|"
+        r"received\s+\d|accepted\s+\d|available\s+online|copyright|all\s+rights\s+reserved|"
+        r"corresponding\s+author|e-mail\s+address|department\s+of|university\s+of|"
+        r"hospital|institute\s+of|school\s+of\s+medicine|faculty\s+of|--- \[page)"
+    )
+
+    scored_candidates = []
+    category_tags = []
+
+    for idx, line in enumerate(top_lines):
+        # Capture short category headers like "ESPEN Guideline" or "Original Article"
+        if len(line) < 40 and re.search(r"(?i)\b(?:guideline|consensus|original\s+article|review\s+article|clinical\s+trial)\b", line):
+            category_tags.append(line)
+
+        if boilerplate_patterns.search(line):
+            continue
+
+        # Skip author lists (many commas and superscripts/initials)
+        if line.count(",") >= 3:
+            continue
+
+        score = 0
+        line_len = len(line)
+        if 25 <= line_len <= 220:
+            score += 35
+        elif 15 <= line_len < 25:
+            score += 15
+        else:
+            score -= 20
+
+        # Position bonus (usually lines 2 to 18)
+        if 1 <= idx <= 18:
+            score += 20
+
+        # Study design keyword bonus in title
+        if re.search(r"(?i)\b(?:guideline|consensus|systematic\s+review|meta-analysis|randomized|trial|cohort|case-control|cross-sectional|prevalence|complications)\b", line):
+            score += 30
+
+        # Penalty for ending with a period (sentences vs titles)
+        if line.endswith("."):
+            score -= 10
+
+        scored_candidates.append((score, idx, line))
+
+    scored_candidates.sort(key=lambda x: x[0], reverse=True)
+    best_title = scored_candidates[0][2] if scored_candidates else (top_lines[0] if top_lines else "")
+
+    # Also grab the line immediately following best_title if it looks like a subtitle continuation
+    if scored_candidates:
+        best_idx = scored_candidates[0][1]
+        if best_idx + 1 < len(top_lines):
+            next_line = top_lines[best_idx + 1]
+            if 10 < len(next_line) < 150 and not boilerplate_patterns.search(next_line) and next_line.count(",") < 2:
+                best_title = f"{best_title} {next_line}"
+
+    combined_title_zone = " | ".join(category_tags + [best_title]) + "\n" + "\n".join(top_lines[:15])
+    return best_title, combined_title_zone
+
+
+def parse_manuscript_sections(text: str) -> Dict[str, str]:
+    """
+    Section-aware parser using heuristic title detection and explicit regex boundary anchors.
+    """
+    detected_title, title_zone = find_probable_title_and_header(text)
+    lower = text.lower()
+
+    # Locate Abstract / Summary
+    abs_match = re.search(r"\n(?:\s*)(?:abstract|summary|s\s+u\s+m\s+m\s+a\s+r\s+y|background\s+and\s+aims)\b", lower[:5000])
+    abs_start = abs_match.start() if abs_match else min(600, len(text))
+
+    # Locate Methods / Methodology
+    m_match = re.search(r"\n(?:\d+\.?\s*)?(?:methods|methodology|materials\s+and\s+methods|patients\s+and\s+methods|study\s+design|search\s+strategy)\b", lower)
+    r_match = re.search(r"\n(?:\d+\.?\s*)?(?:results|findings|basic\s+questions|recommendations)\b", lower)
+    d_match = re.search(r"\n(?:\d+\.?\s*)?(?:discussion|commentary|conclusion)\b", lower)
+    ref_match = re.search(r"\n(?:\d+\.?\s*)?(?:references|bibliography|literature\s+cited)\b", lower)
+
+    m_start = m_match.start() if m_match else min(2200, len(text))
+    r_start = r_match.start() if (r_match and r_match.start() > m_start) else min(m_start + 5500, len(text))
+    d_start = d_match.start() if (d_match and d_match.start() > r_start) else min(r_start + 5500, len(text))
+    ref_start = ref_match.start() if (ref_match and ref_match.start() > m_start) else len(text)
+
+    abstract_zone = text[abs_start:max(abs_start + 2500, m_start)]
+
+    return {
+        "detected_title": detected_title,
+        "title": title_zone,
+        "abstract": abstract_zone[:3000],
+        "methods": text[m_start:min(r_start, m_start + 8000)],
+        "results": text[r_start:min(d_start, r_start + 8000)],
+        "discussion": text[d_start:min(ref_start, d_start + 8000)],
+        "body_no_refs": text[:ref_start],
+    }
 
 
 def format_harvard_authors(raw_authors: str, max_authors: int = 3) -> str:
@@ -531,222 +730,311 @@ def format_harvard_filename(data: dict, extension: str, tag: str = "KAT") -> str
     return re.sub(r"_+", "_", clean_filename)
 
 
-def extract_declared_design_ranked(text: str) -> Optional[Tuple[str, str, int]]:
-    head = text[:6000].lower()
-    ranked_definitions = [
-        ("Systematic Review / Meta-Analysis", [r"\bsystematic\s+review\s+and\s+meta-analysis\b", r"\bmeta-analysis\b", r"\bsystematic\s+review\b"], 100),
-        ("Clinical Practice Guideline / Consensus Statement", [r"\bclinical\s+practice\s+guideline\b", r"\bconsensus\s+statement\b"], 95),
-        ("Randomized Controlled Trial (RCT)", [r"\brandomi[zs]ed\s+controlled\s+trial\b", r"\bdouble-blind(?:ed)?,\s+placebo-controlled\b"], 90),
-        ("Prediction Model Study", [r"\bclinical\s+prediction\s+model\b", r"\bprognostic\s+model\s+study\b"], 85),
-        ("Diagnostic Accuracy Study", [r"\bdiagnostic\s+accuracy\s+study\b", r"\bdiagnostic\s+test\s+accuracy\b"], 82),
-        ("Observational Study (Cohort)", [r"\bretrospective\s+cohort\s+study\b", r"\bprospective\s+cohort\s+study\b", r"\bcohort\s+study\b"], 80),
-        ("Observational Study (Case-Control)", [r"\bcase-control\s+study\b", r"\bmatched\s+case-control\b"], 78),
-        ("Cross-Sectional Study", [r"\bcross-sectional\s+study\b", r"\bprevalence\s+study\b"], 75),
-        ("Qualitative Study", [r"\bqualitative\s+study\b", r"\bthematic\s+analysis\s+study\b"], 70),
-        ("Narrative Review", [r"\bnarrative\s+review\b", r"\bscoping\s+review\b", r"\bliterature\s+review\b"], 65),
-    ]
-
-    discovered = []
-    for design, patterns, rank in ranked_definitions:
-        for p in patterns:
-            match = re.search(p, head)
-            if match:
-                discovered.append((design, match.group(0), rank))
-                break
-
-    if not discovered:
-        return None
-    discovered.sort(key=lambda x: x[2], reverse=True)
-    return discovered[0]
-
-
-def extract_study_features(text: str) -> dict:
-    head = text[:9000].lower()
-    is_review = bool(re.search(r"\b(review|systematic\s+review|meta-analysis|literature\s+search|prisma|scoping\s+review)\b", head))
-    is_guideline = bool(re.search(r"\b(clinical\s+practice\s+guideline|consensus\s+statement|delphi\s+consensus)\b", head))
-    is_rct = bool(re.search(r"\b(randomized\s+controlled\s+trial|randomised\s+controlled\s+trial|double-blind|placebo-controlled|\brct\b)\b", head))
-    is_intervention = bool(re.search(r"\b(intervention|allocated\s+to|treated\s+with|pre-post|quasi-experimental|before-and-after)\b", head))
-    is_diagnostic = bool(re.search(r"\b(diagnostic\s+accuracy|index\s+test|reference\s+standard|sensitivity\s+and\s+specificity|roc\s+curve|auc)\b", head))
-    is_prediction = bool(re.search(r"\b(prediction\s+model|risk\s+score|nomogram|prognostic\s+model|validation\s+cohort|c-index|probast)\b", head))
-    is_cross_sectional = bool(re.search(r"\b(cross-sectional|survey|prevalence\s+study|questionnaire\s+survey|axis\s+tool)\b", head))
-    is_case_control = bool(re.search(r"\b(case-control|cases\s+and\s+controls|matched\s+controls)\b", head))
-    is_cohort = bool(re.search(r"\b(cohort\s+study|prospective\s+cohort|retrospective\s+cohort|longitudinal|follow-up\s+period)\b", head))
-    is_qualitative = bool(re.search(r"\b(qualitative\s+study|thematic\s+analysis|semi-structured\s+interview|focus\s+groups)\b", head))
-
-    is_secondary = is_review or is_guideline
-    is_primary = not is_secondary or bool(re.search(r"\b(we\s+enrolled|patients\s+were\s+recruited|our\s+cohort|consecutive\s+patients)\b", head))
-
-    return {
-        "primary_research": is_primary and not is_guideline,
-        "secondary_synthesis": is_secondary,
-        "meta_analysis": bool(re.search(r"\b(meta-analysis|forest\s+plot|pooled\s+odds|i\^2|heterogeneity)\b", head)),
-        "systematic_search": bool(re.search(r"\b(prisma|database\s+search|pubmed\s+and\s+embase)\b", head)),
-        "guideline_document": is_guideline,
-        "randomized": is_rct,
-        "intervention_assigned": is_intervention,
-        "diagnostic_accuracy": is_diagnostic,
-        "prediction_model": is_prediction,
-        "cross_sectional": is_cross_sectional,
-        "case_control": is_case_control,
-        "cohort": is_cohort,
-        "qualitative": is_qualitative,
-    }
-
-
-def classify_from_features(features: dict) -> str:
-    if features.get("guideline_document"):
-        return "Clinical Practice Guideline / Consensus Statement"
-    if features.get("secondary_synthesis") and not features.get("primary_research"):
-        if features.get("systematic_search") or features.get("meta_analysis"):
-            return "Systematic Review / Meta-Analysis"
-        return "Narrative Review"
-    if features.get("randomized"):
-        return "Randomized Controlled Trial (RCT)"
-    if features.get("diagnostic_accuracy"):
-        return "Diagnostic Accuracy Study"
-    if features.get("prediction_model"):
-        return "Prediction Model Study"
-    if features.get("cross_sectional"):
-        return "Cross-Sectional Study"
-    if features.get("case_control"):
-        return "Observational Study (Case-Control)"
-    if features.get("cohort"):
-        return "Observational Study (Cohort)"
-    if features.get("intervention_assigned"):
-        return "Non-Randomized Intervention / Quasi-Experimental"
-    if features.get("qualitative"):
-        return "Qualitative Study"
-
-    return "Observational Study (Cohort)"
-
-
-def compute_weighted_keyword_frequencies(text: str) -> str:
-    head_title = text[:600].lower()
-    abstract_zone = text[600:3000].lower()
-    body_zone = text[3000:12000].lower()
-
-    scores = {
-        "Observational Study (Cohort)": 0,
-        "Observational Study (Case-Control)": 0,
-        "Cross-Sectional Study": 0,
-        "Systematic Review / Meta-Analysis": 0,
-        "Randomized Controlled Trial (RCT)": 0,
-        "Diagnostic Accuracy Study": 0,
-    }
-    terms = {
-        "Observational Study (Cohort)": ["cohort", "follow-up", "retrospective", "prospective"],
-        "Observational Study (Case-Control)": ["case-control", "case control", "odds ratio"],
-        "Cross-Sectional Study": ["cross-sectional", "prevalence", "survey"],
-        "Systematic Review / Meta-Analysis": ["prisma", "database search", "systematic review", "meta-analysis"],
-        "Randomized Controlled Trial (RCT)": ["randomized", "randomised", "placebo", "double-blind"],
-        "Diagnostic Accuracy Study": ["sensitivity", "specificity", "index test", "reference standard"],
-    }
-    for design, word_list in terms.items():
-        for w in word_list:
-            scores[design] += (head_title.count(w) * 5) + (abstract_zone.count(w) * 3) + (body_zone.count(w) * 1)
-
-    return max(scores, key=scores.get)
-
-
-def verify_architecture_with_first_page(
-    client: Optional[genai.Client], first_page_text: str, candidate_tools: List[str]
-) -> str:
-    if not client:
-        return ""
-    tools_str = ", ".join(f"'{t}'" for t in candidate_tools if not t.startswith("🔍"))
-    verify_prompt = f"""
-    You are an expert epidemiological classifier.
-    Examine ONLY the title, abstract, and study design descriptors from Page 1:
-    {first_page_text[:4500]}
-    Select the EXACT matching study design: [{tools_str}]
-    Output JSON: {{"confirmed_design": "Design name"}}
+# ==========================================
+# 3. HIERARCHICAL OVERRIDES & CONSISTENCY AUDITOR
+# ==========================================
+def detect_hierarchical_overrides(sections: Dict[str, str]) -> Optional[Tuple[str, List[str], List[str]]]:
     """
-    for model_name in FREE_ACTIVE_MODELS:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=[verify_prompt],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.0,
-                ),
-            )
-            parsed = json.loads(response.text)
-            return parsed.get("confirmed_design", "")
-        except Exception:
-            continue
-    return ""
+    Evidence Hierarchy Short-Circuit:
+    Guidelines contain systematic reviews; systematic reviews do not contain graded consensus recommendations.
+    If an unambiguous structural signature of a higher-order design is present, return immediately without voting.
+    """
+    title_l = sections["title"].lower()
+    abs_l = sections["abstract"].lower()
+    meth_l = sections["methods"].lower()
+    body_head = sections["body_no_refs"][:12000].lower()
 
+    # HIERARCHY TIER 1: Clinical Practice Guideline / Consensus Statement
+    has_guideline_title = bool(re.search(r"\b(?:practical\s+guideline|clinical\s+practice\s+guideline|espen\s+guideline|consensus\s+statement|consensus\s+guidelines?|practice\s+guideline)\b", title_l))
+    has_graded_recommendations = bool(re.search(r"(?:grade\s+of\s+recommendation|strong\s+consensus\s*\(\d+%\s*agreement\)|recommendation\s+\d+\s*\n|sign\s+methodology|delphi\s+rounds?)", meth_l + body_head))
 
-def run_four_source_ensemble(
-    text: str, client: Optional[genai.Client], available_designs: List[str]
-) -> dict:
-    evidence_points = []
-    declared_res = extract_declared_design_ranked(text)
-    declared_pred = declared_res[0] if declared_res else None
-    if declared_pred:
-        evidence_points.append(f"Declared: Author explicitly states '{declared_res[1]}' (Priority Rank: {declared_res[2]})")
+    if has_guideline_title or has_graded_recommendations:
+        decision_path = [
+            "Tier 1 Hierarchical Override Triggered: Clinical Practice Guideline / Consensus Statement",
+        ]
+        if has_guideline_title:
+            decision_path.append(f"Probable Title/Header contains explicit guideline declaration ('{sections['detected_title'][:80]}')")
+        if has_graded_recommendations:
+            decision_path.append("Manuscript body/methods contains formal recommendation grading & consensus agreement percentages")
+        excluded = [
+            "AMSTAR 2 excluded by hierarchy: Guidelines synthesize systematic reviews, but systematic reviews do not issue graded consensus recommendations",
+            "Cochrane RoB 2 & NOS excluded: Document is a secondary clinical practice guideline, not a primary patient cohort"
+        ]
+        return "Clinical Practice Guideline / Consensus Statement", decision_path, excluded
 
-    features = extract_study_features(text)
-    feature_pred = classify_from_features(features)
-    evidence_points.append(f"Features: Primary={features.get('primary_research')}, Cohort={features.get('cohort')}, RCT={features.get('randomized')}")
+    # HIERARCHY TIER 2: Systematic Review / Meta-Analysis
+    has_sr_title = bool(re.search(r"\b(?:systematic\s+review|meta-analysis|network\s+meta-analysis)\b", title_l))
+    has_prisma_methods = bool(re.search(r"\b(?:prisma|preferred\s+reporting\s+items\s+for\s+systematic|prospero|boolean|databases?\s+were\s+searched)\b", meth_l + abs_l))
 
-    keyword_pred = compute_weighted_keyword_frequencies(text)
-    evidence_points.append(f"Positional Keywords: Highest weighted score points to '{keyword_pred}'")
+    if has_sr_title and has_prisma_methods:
+        return (
+            "Systematic Review / Meta-Analysis",
+            [
+                "Tier 2 Hierarchical Override Triggered: Systematic Review / Meta-Analysis",
+                "Title explicitly declares Systematic Review / Meta-Analysis AND Methods/Abstract confirms PRISMA/database search protocol"
+            ],
+            [
+                "SANRA excluded: Formal systematic search protocol (PRISMA/PROSPERO) present",
+                "Primary study tools (RoB 2 / NOS) excluded: Secondary evidence synthesis"
+            ]
+        )
 
-    llm_pred = verify_architecture_with_first_page(client, text, available_designs)
-    if llm_pred:
-        evidence_points.append(f"Page-1 Verifier: Confirmed '{llm_pred}'")
+    # HIERARCHY TIER 3: Randomized Controlled Trial (RCT)
+    has_rct_title = bool(re.search(r"\b(?:randomi[zs]ed\s+controlled\s+trial|randomi[zs]ed\s+clinical\s+trial|double-blind.*trial|phase\s+iii\s+trial)\b", title_l))
+    has_random_allocation = bool(re.search(r"\b(?:randomly\s+assigned|randomi[zs]ed\s+to\s+receive|allocation\s+concealment|computer-generated\s+random)\b", meth_l + abs_l))
 
-    if declared_pred:
-        assigned_confidence = 0.98 if feature_pred == declared_pred else 0.82
-        return {
-            "winner": declared_pred,
-            "confidence": assigned_confidence,
-            "trace": {"declared_design": declared_pred, "feature_prediction": feature_pred, "keyword_prediction": keyword_pred, "llm_prediction": llm_pred or "N/A", "consensus": declared_pred, "confidence": assigned_confidence},
-            "evidence": evidence_points,
-            "override_applied": True,
-        }
+    if has_rct_title and has_random_allocation:
+        return (
+            "Randomized Controlled Trial (RCT)",
+            [
+                "Tier 3 Hierarchical Override Triggered: Randomized Controlled Trial (RCT)",
+                "Title declares randomized trial AND Methods/Abstract confirms active participant randomization"
+            ],
+            [
+                "ROBINS-I & NOS excluded: Active randomized allocation confirmed",
+                "AMSTAR 2 excluded: Primary interventional trial"
+            ]
+        )
 
-    votes = [(feature_pred, 0.50), (llm_pred, 0.35 if llm_pred else 0.0), (keyword_pred, 0.15)]
-    scores = {}
-    tot_w = 0.0
-    for pred, w in votes:
-        if pred:
-            scores[pred] = scores.get(pred, 0.0) + w
-            tot_w += w
-    winner = max(scores, key=scores.get) if scores else "Observational Study (Cohort)"
-    conf = round(scores[winner] / (tot_w if tot_w > 0 else 1.0), 2)
-
-    return {
-        "winner": winner,
-        "confidence": conf,
-        "trace": {"declared_design": "None Detected", "feature_prediction": feature_pred, "keyword_prediction": keyword_pred, "llm_prediction": llm_pred or "N/A", "consensus": winner, "confidence": conf},
-        "evidence": evidence_points,
-        "override_applied": False,
-    }
-
-
-def detect_classification_contradiction(manuscript_text: str, predicted_design: str) -> Optional[str]:
-    header = manuscript_text[:4000].lower()
-    if "review" in predicted_design.lower():
-        if any(term in header for term in ["retrospective cohort", "prospective cohort", "comparative study", "consecutive patients"]):
-            return "Manuscript explicitly declares an empirical cohort/comparative study, but assigned framework is Review. Appraisal blocked."
-    if "cohort" in predicted_design.lower() or "rct" in predicted_design.lower():
-        if "systematic review and meta-analysis" in header or "systematic review" in header:
-            return "Manuscript explicitly declares a Systematic Review, but assigned framework is Empirical. Appraisal blocked."
     return None
 
 
-def trim_manuscript_body(text: str) -> str:
-    lower = text.lower()
-    for marker in ["\nreferences\n", "\nbibliography\n", "\nliterature cited\n"]:
-        pos = lower.rfind(marker)
-        if pos != -1 and pos > (len(text) * 0.45):
-            return text[:pos]
-    return text
+def run_deterministic_section_classifier(sections: Dict[str, str]) -> Tuple[str, Dict[str, int], List[str], List[str], bool]:
+    """
+    Classifier A: First checks Hierarchical Short-Circuits, then falls back to Section-Aware Scoring.
+    """
+    override = detect_hierarchical_overrides(sections)
+    if override:
+        winner, decision_path, excluded = override
+        scores = {k: (100 if k == winner else 0) for k in LEGAL_PAIRS.keys()}
+        return winner, scores, decision_path, excluded, True
+
+    title_l = sections["title"].lower()
+    abs_l = sections["abstract"].lower()
+    meth_l = sections["methods"].lower()
+
+    scores = {k: 0 for k in LEGAL_PAIRS.keys()}
+    decision_path = []
+    excluded_alternatives = []
+
+    # 1. Title-Zone Rules
+    title_rules = [
+        ("Clinical Practice Guideline / Consensus Statement", [r"\bguidelines?\b", r"\bconsensus\b"], 85),
+        ("Systematic Review / Meta-Analysis", [r"\bsystematic\s+review\b", r"\bmeta-analysis\b"], 80),
+        ("Randomized Controlled Trial (RCT)", [r"\brandomi[zs]ed\b", r"\bclinical\s+trial\b"], 75),
+        ("Observational Study (Cohort)", [r"\b(?:retrospective|prospective)\s+cohort\b", r"\bcohort\s+study\b", r"\bcomplications\s+of\b"], 70),
+        ("Observational Study (Case-Control)", [r"\bcase-control\b"], 75),
+        ("Cross-Sectional Study", [r"\bcross-sectional\b", r"\bprevalence\b", r"\bsurvey\b"], 75),
+        ("Diagnostic Accuracy Study", [r"\bdiagnostic\s+accuracy\b", r"\bsensitivity\s+and\s+specificity\b"], 75),
+        ("Prediction Model Study", [r"\bprediction\s+model\b", r"\bprognostic\s+model\b", r"\brisk\s+score\b"], 75),
+        ("Qualitative Study", [r"\bqualitative\b", r"\bthematic\s+analysis\b"], 75),
+        ("Narrative Review", [r"\bnarrative\s+review\b", r"\bliterature\s+review\b", r"\bscoping\s+review\b"], 70),
+    ]
+
+    for design, patterns, pts in title_rules:
+        for p in patterns:
+            m = re.search(p, title_l)
+            if m:
+                scores[design] += pts
+                decision_path.append(f"Title zone matched '{m.group(0)}' (+{pts} pts for {design})")
+                break
+
+    # 2. Methods & Abstract Empirical Signals
+    if re.search(r"\b(?:retrospective\s+review|medical\s+records\s+were\s+reviewed|consecutive\s+patients|patients\s+who\s+underwent|institutional\s+review\s+board|irb\s+approval)\b", meth_l + abs_l):
+        scores["Observational Study (Cohort)"] += 65
+        scores["Narrative Review"] -= 45
+        scores["Systematic Review / Meta-Analysis"] -= 45
+        decision_path.append("Methods/Abstract confirms empirical patient cohort & chart review (+65 Cohort; -45 Review)")
+        excluded_alternatives.append("AMSTAR 2 & SANRA excluded because study analyzes primary patient medical records")
+
+    if re.search(r"\b(?:cases\s+and\s+controls|matched\s+controls)\b", meth_l + abs_l):
+        scores["Observational Study (Case-Control)"] += 60
+        decision_path.append("Methods/Abstract describes case-control matching (+60 Case-Control)")
+
+    if re.search(r"\b(?:cross-sectional\s+survey|questionnaire\s+was\s+administered)\b", meth_l + abs_l):
+        scores["Cross-Sectional Study"] += 60
+        decision_path.append("Methods/Abstract describes cross-sectional survey (+60 Cross-Sectional)")
+
+    if re.search(r"\b(?:review\s+of\s+the\s+literature|this\s+review\s+summarizes|narrative\s+overview)\b", abs_l + meth_l) and scores["Observational Study (Cohort)"] < 30:
+        scores["Narrative Review"] += 55
+        decision_path.append("Abstract/Methods describes non-systematic literature overview (+55 Narrative Review)")
+
+    winner = max(scores, key=scores.get)
+    if scores[winner] <= 0:
+        winner = "Observational Study (Cohort)"
+        scores[winner] = 40
+        decision_path.append("Defaulted to Observational Study (Cohort) based on clinical structure")
+
+    return winner, scores, decision_path, excluded_alternatives, False
 
 
+def run_llm_classifier_b(client: Optional[genai.Client], sections: Dict[str, str], available_designs: List[str]) -> Tuple[str, str]:
+    if not client:
+        return "", "No API key active"
+    valid_list = [d for d in available_designs if not d.startswith("🔍")]
+    prompt = f"""
+    You are an epidemiological study-design classifier.
+    Evaluate the isolated sections below. Ignore background literature cited in the introduction; focus on what THIS document actually is.
+
+    PROBABLE TITLE:
+    {sections['detected_title']}
+
+    TITLE ZONE:
+    {sections['title'][:600]}
+
+    ABSTRACT / SUMMARY:
+    {sections['abstract'][:1500]}
+
+    METHODS SECTION:
+    {sections['methods'][:2000]}
+
+    Select the EXACT design from: {json.dumps(valid_list)}
+    Output JSON:
+    {{
+      "llm_design": "Exact design name",
+      "llm_rationale": "1 sentence explanation"
+    }}
+    """
+    for model_name in FREE_ACTIVE_MODELS:
+        try:
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=[prompt],
+                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.0),
+            )
+            parsed = json.loads(resp.text)
+            return parsed.get("llm_design", ""), parsed.get("llm_rationale", "")
+        except (json.JSONDecodeError, KeyError):
+            continue
+        except Exception:
+            continue
+    return "", "LLM classifier unavailable"
+
+
+def run_framework_consistency_auditor(
+    text: str, client: Optional[genai.Client], available_designs: List[str]
+) -> dict:
+    """
+    Executes Hierarchical Override Check, Section-Aware Classification, and Calibrated Disagreement Penalty.
+    Does NOT trigger annoying hard stops on borderline Cohort vs Case-Control disagreements;
+    instead deducts 0.15 confidence and only flags human review if confidence < 0.80 or margin < 15.
+    """
+    sections = parse_manuscript_sections(text)
+    rule_winner, score_map, decision_path, excluded_alts, is_hierarchical = run_deterministic_section_classifier(sections)
+    llm_winner, llm_rationale = run_llm_classifier_b(client, sections, available_designs)
+
+    sorted_scores = sorted(score_map.items(), key=lambda x: x[1], reverse=True)
+    first_design, first_score = sorted_scores[0]
+    second_design, second_score = sorted_scores[1] if len(sorted_scores) > 1 else ("None", 0)
+    margin = first_score - second_score
+
+    base_confidence = 0.98 if is_hierarchical else min(0.95, round(0.75 + (margin / 250.0), 2))
+    disagreement_detected = bool(llm_winner and llm_winner in score_map and llm_winner != rule_winner)
+
+    if disagreement_detected and not is_hierarchical:
+        base_confidence = round(max(0.50, base_confidence - 0.15), 2)
+        decision_path.append(f"LLM Classifier B suggested '{llm_winner}' (-0.15 confidence adjustment applied)")
+    elif disagreement_detected and is_hierarchical:
+        decision_path.append(f"Hierarchical Override ('{rule_winner}') superseded LLM suggestion ('{llm_winner}')")
+
+    requires_human_confirmation = (base_confidence < 0.80) or (margin < MIN_CONFIDENCE_MARGIN and not is_hierarchical)
+
+    if is_hierarchical:
+        status = "Verified by Hierarchical Override"
+    elif requires_human_confirmation:
+        status = f"Advisory: Low Margin or Classifier Split (Confidence: {int(base_confidence * 100)}%)"
+    else:
+        status = "Verified Consistent"
+
+    expected_tool = SEED_TAXONOMY.get(rule_winner, {}).get("tool", "Assigned Tool")
+
+    return {
+        "design": rule_winner,
+        "tool": expected_tool,
+        "status": status,
+        "hierarchical_override": is_hierarchical,
+        "classifier_a_rule_engine": f"{rule_winner} ({first_score} pts; runner-up: {second_design} at {second_score} pts)",
+        "classifier_b_llm": f"{llm_winner or 'Not Run'} ({llm_rationale})",
+        "confidence_margin": margin,
+        "disagreement_detected": disagreement_detected,
+        "requires_human_confirmation": requires_human_confirmation,
+        "decision_tree": decision_path,
+        "excluded_alternatives": excluded_alts,
+        "confidence": base_confidence,
+        "sections_preview": {
+            "detected_title": sections["detected_title"],
+            "title_zone": sections["title"][:500],
+            "abstract_zone": sections["abstract"][:500],
+            "methods_zone": sections["methods"][:500],
+        }
+    }
+
+
+def validate_framework_signature_and_legality(
+    design: str,
+    selected_tool: str,
+    generated_domains: List[dict],
+    manuscript_text: str
+) -> Tuple[List[str], List[str]]:
+    """
+    Split into:
+    1. HARD FAILS (ClassificationConsistencyError): Objective impossibilities
+       - Illegal Design <-> Tool pairing (e.g. Guideline + AMSTAR 2)
+       - Cross-contaminated tool domains (e.g. AMSTAR 2 outputting AGREE II 'Stakeholder Involvement')
+       - Source manuscript impossible combinations (e.g. RCT with zero mention of random/allocation/trial)
+    2. WARNINGS ONLY: Probabilistic keyword overlap or short methods sections.
+    """
+    passed_notes = []
+    warnings = []
+    text_lower = manuscript_text.lower() if manuscript_text else ""
+
+    # --- HARD FAIL 1: Legality Matrix ---
+    if design in LEGAL_PAIRS:
+        allowed_tools = LEGAL_PAIRS[design]
+        if not any(allowed.lower() in selected_tool.lower() or selected_tool.lower() in allowed.lower() for allowed in allowed_tools):
+            raise ClassificationConsistencyError(
+                f"Hard Fail — Illegal Design-Tool Pair: '{design}' cannot be evaluated with '{selected_tool}'. Allowed: {allowed_tools}"
+            )
+        passed_notes.append(f"Legality Matrix Verified: '{design}' <-> '{selected_tool}'")
+
+    # --- HARD FAIL 2: Foreign Tool Domain Cross-Contamination ---
+    domain_names_blob = " ".join([str(d.get("domain_name", "")).lower() for d in generated_domains])
+    if "AMSTAR" in selected_tool.upper() and ("stakeholder involvement" in domain_names_blob or "editorial independence" in domain_names_blob):
+        raise ClassificationConsistencyError("Hard Fail — Cross-Contamination: AMSTAR 2 output contains AGREE II guideline domains.")
+    if "AGREE" in selected_tool.upper() and ("duplicate study selection" in domain_names_blob or "publication bias" in domain_names_blob):
+        raise ClassificationConsistencyError("Hard Fail — Cross-Contamination: AGREE II output contains AMSTAR 2 review domains.")
+
+    # --- HARD FAIL 3: Source-Manuscript Direct Verification ---
+    sig = FRAMEWORK_SIGNATURES.get(design)
+    if sig and text_lower:
+        must_have_any = sig.get("source_must_have_any", [])
+        if must_have_any and not any(re.search(p, text_lower) for p in must_have_any):
+            raise ClassificationConsistencyError(
+                f"Hard Fail — Source Verification Failed: Manuscript lacks any required structural markers for '{design}' ({must_have_any})."
+            )
+        passed_notes.append(f"Source-Text Verification Passed: Manuscript contains required '{design}' markers.")
+
+        for forbidden_pat in sig.get("source_must_not_have", []):
+            if re.search(forbidden_pat, text_lower[:8000]):
+                warnings.append(f"Source Advisory: Detected phrase matching '{forbidden_pat}' in manuscript; verify architecture.")
+
+    # --- SOFT WARNING: Expected Domain Keyword Overlap ---
+    if sig and generated_domains:
+        expected_kws = sig.get("expected_domain_keywords", [])
+        matches = sum(1 for kw in expected_kws if kw in domain_names_blob)
+        if matches < max(1, len(expected_kws) // 2):
+            warnings.append(
+                f"Low Domain Keyword Overlap ({matches}/{len(expected_kws)} canonical keywords matched for {selected_tool})."
+            )
+        else:
+            passed_notes.append(f"Domain Keyword Overlap: {matches}/{len(expected_kws)} canonical terms matched.")
+
+    return passed_notes, warnings
+
+
+# ==========================================
+# 4. DUAL-THRESHOLD GROUNDEDNESS & SCORE RECONCILER
+# ==========================================
 def clean_tokens(s: str) -> List[str]:
     s = s.lower()
     s = re.sub(r"[\u2018\u2019\u201c\u201d]", "'", s)
@@ -755,10 +1043,10 @@ def clean_tokens(s: str) -> List[str]:
     return s.split()
 
 
-def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.82) -> Tuple[bool, float]:
+def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.85) -> Tuple[bool, float]:
     quote_tokens = clean_tokens(quote)
     if not quote_tokens:
-        return True, 1.0
+        return False, 0.0
     q_len = len(quote_tokens)
     q_str = " ".join(quote_tokens)
     source_clean = " ".join(clean_tokens(source_text))
@@ -789,41 +1077,52 @@ def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.82) -> 
 
 
 def run_comprehensive_checksum(
-    data: dict, full_raw_text: str, fuzzy_threshold: float = 0.82
+    data: dict, full_raw_text: str
 ) -> Tuple[dict, float, List[str], List[str]]:
+    """
+    Fixes the 100% groundedness bug when source text is missing (returns 0.0%).
+    Splits threshold: Direct quotes require >= 0.95 similarity; Paraphrased evidence requires >= 0.85.
+    """
     grounding_warnings: List[str] = []
     flaw_warnings: List[str] = []
 
     if not full_raw_text or not full_raw_text.strip():
-        return data, 100.0, ["Source text unavailable."], ["Cannot verify integrity without source text."]
+        data["groundedness_score"] = 0.0
+        data["groundedness_warnings"] = ["Source text unavailable for verification (0.0% Grounded)."]
+        data["checksum_flaws"] = ["Cannot verify quote integrity without extracted source text."]
+        data["checksum_passed"] = False
+        return data, 0.0, data["groundedness_warnings"], data["checksum_flaws"]
 
     domains = data.get("domain_appraisals", [])
     if not domains:
-        return data, 100.0, [], ["No domain appraisals populated."]
+        data["groundedness_score"] = 0.0
+        return data, 0.0, [], ["No domain appraisals populated."]
 
     verified_count = 0
     for d in domains:
-        quote = d.get("verbatim_evidence", "").strip()
-        if not quote or quote.lower() in ["not reported", "none", "n/a", "not specified", "unclear"]:
-            d["checksum_status"] = "Verified (Not Applicable)"
+        raw_quote = d.get("verbatim_evidence", "").strip()
+        if not raw_quote or raw_quote.lower() in ["not reported", "none", "n/a", "not specified", "unclear"]:
+            d["checksum_status"] = "Verified (Absence Noted)"
             verified_count += 1
             continue
 
-        is_match, ratio = fuzzy_quote_match(quote, full_raw_text, threshold=fuzzy_threshold)
+        is_direct_quote = raw_quote.startswith('"') or raw_quote.startswith("“") or raw_quote.startswith("'")
+        req_threshold = 0.95 if is_direct_quote else 0.85
+
+        is_match, ratio = fuzzy_quote_match(raw_quote, full_raw_text, threshold=req_threshold)
         if is_match:
-            d["checksum_status"] = f"Verified Grounded ({int(ratio * 100)}% Match)"
+            mode_tag = "Direct Quote" if is_direct_quote else "Evidence"
+            d["checksum_status"] = f"Verified {mode_tag} ({int(ratio * 100)}%)"
             verified_count += 1
+        elif ratio >= 0.85 and is_direct_quote:
+            d["checksum_status"] = f"Paraphrase Match ({int(ratio * 100)}% < 95% Direct Quote Threshold)"
+            verified_count += 0.5
+            grounding_warnings.append(f"'{d.get('domain_name')}' quote matched at {int(ratio * 100)}% (paraphrased rather than verbatim).")
         else:
-            d["checksum_status"] = f"Unverified Grounding ({int(ratio * 100)}% Max Similarity)"
-            grounding_warnings.append(f"Quote in '{d.get('domain_name')}' matched at {int(ratio * 100)}%.")
+            d["checksum_status"] = f"Unverified ({int(ratio * 100)}% Max Match)"
+            grounding_warnings.append(f"Evidence in '{d.get('domain_name')}' fell below {int(req_threshold * 100)}% threshold ({int(ratio * 100)}%).")
 
     grounded_score = round((verified_count / len(domains)) * 100, 1)
-    ratings_summary = str(data.get("ratings_summary", {})).upper()
-    has_high_risk = any("high" in str(d.get("rating", "")).lower() or "critical" in str(d.get("rating", "")).lower() for d in domains)
-
-    if "GOOD" in ratings_summary and has_high_risk:
-        flaw_warnings.append("Methodological Contradiction: Good quality assigned despite high-risk domain.")
-
     data["groundedness_score"] = grounded_score
     data["groundedness_warnings"] = grounding_warnings
     data["checksum_flaws"] = flaw_warnings
@@ -861,23 +1160,25 @@ def discover_appraisal_tool(client: genai.Client, text_sample: str) -> Tuple[str
             )
             res_json = json.loads(response.text)
             return res_json["design_name"], res_json["tool_taxonomy"]
+        except (json.JSONDecodeError, KeyError):
+            continue
         except Exception:
             continue
-    raise RuntimeError("Failed to discover tool schema across all free models.")
+    raise RuntimeError("Failed to discover tool schema across active models.")
 
 
-def reconcile_appraisal_scores(parsed: dict) -> dict:
-    """
-    Deterministically computes mathematical totals from the domain ratings
-    and ensures overall_verdict and ratings_summary align with individual domain grades.
-    """
+def reconcile_appraisal_scores(parsed: dict, assigned_design: Optional[str] = None) -> dict:
+    if assigned_design and assigned_design in SEED_TAXONOMY:
+        parsed["study_design"] = assigned_design
+        parsed["appraisal_tool_selected"] = SEED_TAXONOMY[assigned_design]["tool"]
+
     tool_name = str(parsed.get("appraisal_tool_selected", "")).upper()
     domains = parsed.get("domain_appraisals", [])
 
     if not domains:
         return parsed
 
-    # --- 1. SANRA Deterministic Reconciliation ---
+    # 1. SANRA Deterministic Reconciliation
     if "SANRA" in tool_name:
         total_pts = 0
         for d in domains:
@@ -893,41 +1194,54 @@ def reconcile_appraisal_scores(parsed: dict) -> dict:
                 pts = 2
             total_pts += pts
 
-        # Standard SANRA thresholds: 9-12 High, 6-8 Moderate, 0-5 Low
         if total_pts >= 9:
-            verdict = "High Quality / Low Risk"
-            meth_quality = "GOOD"
+            verdict, meth_quality = "High Quality / Low Risk", "GOOD"
         elif total_pts >= 6:
-            verdict = "Moderate Quality / Moderate Risk"
-            meth_quality = "FAIR"
+            verdict, meth_quality = "Moderate Quality / Moderate Risk", "FAIR"
         else:
-            verdict = "Low Quality / High Risk"
-            meth_quality = "POOR"
+            verdict, meth_quality = "Low Quality / High Risk", "POOR"
 
         parsed["overall_verdict"] = verdict
-        if "ratings_summary" not in parsed:
-            parsed["ratings_summary"] = {}
-        parsed["ratings_summary"]["methodology_quality"] = meth_quality
+        parsed.setdefault("ratings_summary", {})["methodology_quality"] = meth_quality
 
-    # --- 2. Newcastle-Ottawa Scale (NOS) Deterministic Reconciliation ---
+    # 2. AGREE II Deterministic Reconciliation (1-7 Scale)
+    elif "AGREE" in tool_name:
+        total_pts = 0
+        count = len(domains)
+        for d in domains:
+            r_str = str(d.get("rating", "")).strip()
+            m = re.search(r"\b([1-7])\b", r_str)
+            pts = int(m.group(1)) if m else 5
+            total_pts += pts
+        min_poss = 1 * count
+        max_poss = 7 * count
+        scaled_pct = round(((total_pts - min_poss) / max(1, (max_poss - min_poss))) * 100, 1)
+        if scaled_pct >= 70.0:
+            verdict, meth_quality = f"Strongly Recommended ({scaled_pct}% Scaled Rigour)", "GOOD"
+        elif scaled_pct >= 50.0:
+            verdict, meth_quality = f"Recommended with Modifications ({scaled_pct}% Scaled Rigour)", "FAIR"
+        else:
+            verdict, meth_quality = f"Not Recommended ({scaled_pct}% Scaled Rigour)", "POOR"
+        parsed["overall_verdict"] = verdict
+        parsed["agree_scaled_percentage"] = scaled_pct
+        parsed.setdefault("ratings_summary", {})["methodology_quality"] = meth_quality
+
+    # 3. Newcastle-Ottawa Scale (NOS)
     elif "NOS" in tool_name or "NEWCASTLE" in tool_name:
-        sel_stars = 0
-        comp_stars = 0
-        out_stars = 0
-
+        sel_stars, comp_stars, out_stars = 0, 0, 0
         for d in domains:
             d_name = str(d.get("domain_name", "")).lower()
-            stars_in_critique = str(d.get("rating", "")).count("★") or str(d.get("rating", "")).count("*")
-            if stars_in_critique == 0:
-                match = re.search(r"\b([0-4])\s*(?:stars?|★)?\b", str(d.get("rating", "")).lower())
-                stars_in_critique = int(match.group(1)) if match else 0
-
+            r_str = str(d.get("rating", ""))
+            stars = r_str.count("★") or r_str.count("*")
+            if stars == 0:
+                m = re.search(r"\b([0-4])\s*(?:stars?|★)?\b", r_str.lower())
+                stars = int(m.group(1)) if m else (1 if "yes" in r_str.lower() or "awarded" in r_str.lower() else 0)
             if "selection" in d_name:
-                sel_stars += min(stars_in_critique, 4)
+                sel_stars += min(stars, 4)
             elif "comparability" in d_name:
-                comp_stars += min(stars_in_critique, 2)
+                comp_stars += min(stars, 2)
             elif "outcome" in d_name or "exposure" in d_name:
-                out_stars += min(stars_in_critique, 3)
+                out_stars += min(stars, 3)
 
         total_stars = sel_stars + comp_stars + out_stars
         parsed["nos_score_breakdown"] = {
@@ -936,53 +1250,44 @@ def reconcile_appraisal_scores(parsed: dict) -> dict:
             "outcome_stars": out_stars,
             "total_stars": total_stars
         }
-
         if total_stars >= 7:
-            verdict = "Good Quality / Low Risk"
-            meth_quality = "GOOD"
+            verdict, meth_quality = "Good Quality / Low Risk", "GOOD"
         elif total_stars >= 4:
-            verdict = "Fair Quality / Moderate Risk"
-            meth_quality = "FAIR"
+            verdict, meth_quality = "Fair Quality / Moderate Risk", "FAIR"
         else:
-            verdict = "Poor Quality / High Risk"
-            meth_quality = "POOR"
-
+            verdict, meth_quality = "Poor Quality / High Risk", "POOR"
         parsed["overall_verdict"] = verdict
-        if "ratings_summary" not in parsed:
-            parsed["ratings_summary"] = {}
-        parsed["ratings_summary"]["methodology_quality"] = meth_quality
+        parsed.setdefault("ratings_summary", {})["methodology_quality"] = meth_quality
 
-    # --- 3. Cochrane RoB 2 / ROBINS-I / AMSTAR 2 / QUADAS-2 Deterministic Gates ---
+    # 4. Cochrane RoB 2 / ROBINS-I / AMSTAR 2 / QUADAS-2
     elif "ROB" in tool_name or "AMSTAR" in tool_name or "QUADAS" in tool_name:
         ratings = [str(d.get("rating", "")).lower() for d in domains]
-        high_crit_count = sum(1 for r in ratings if "high" in r or "critical" in r or "serious" in r)
-        some_concerns = sum(1 for r in ratings if "some" in r or "moderate" in r or "unclear" in r)
+        high_crit_count = sum(1 for r in ratings if ("high" in r or "critical" in r or "serious" in r or r == "no" or "not met" in r))
+        some_concerns = sum(1 for r in ratings if ("some" in r or "moderate" in r or "unclear" in r or "partial" in r))
 
-        if high_crit_count >= 1:
+        if high_crit_count > 1 and "AMSTAR" in tool_name:
+            parsed["overall_verdict"] = "Critically Low Confidence"
+            parsed.setdefault("ratings_summary", {})["methodology_quality"] = "POOR"
+        elif high_crit_count == 1 and "AMSTAR" in tool_name:
+            parsed["overall_verdict"] = "Low Confidence"
+            parsed.setdefault("ratings_summary", {})["methodology_quality"] = "POOR"
+        elif high_crit_count >= 1:
             parsed["overall_verdict"] = "High Risk of Bias"
-            if "ratings_summary" not in parsed:
-                parsed["ratings_summary"] = {}
-            parsed["ratings_summary"]["methodology_quality"] = "POOR"
+            parsed.setdefault("ratings_summary", {})["methodology_quality"] = "POOR"
         elif some_concerns >= 1:
-            parsed["overall_verdict"] = "Some Concerns / Moderate Risk"
-            if "ratings_summary" not in parsed:
-                parsed["ratings_summary"] = {}
-            parsed["ratings_summary"]["methodology_quality"] = "FAIR"
+            parsed["overall_verdict"] = "Moderate Confidence / Some Concerns"
+            parsed.setdefault("ratings_summary", {})["methodology_quality"] = "FAIR"
         else:
-            parsed["overall_verdict"] = "Low Risk of Bias"
-            if "ratings_summary" not in parsed:
-                parsed["ratings_summary"] = {}
-            parsed["ratings_summary"]["methodology_quality"] = "GOOD"
+            parsed["overall_verdict"] = "High Confidence / Low Risk"
+            parsed.setdefault("ratings_summary", {})["methodology_quality"] = "GOOD"
 
     return parsed
 
 
 def extract_explicit_score_from_data(data: dict) -> str:
-    """Extracts or derives the tool's definitive numerical or scale score accurately."""
     tool_name = str(data.get("appraisal_tool_selected", "")).upper()
     verdict = str(data.get("overall_verdict", "N/A"))
 
-    # 1. Specialized Newcastle-Ottawa Scale (NOS)
     nos_stars = data.get("nos_score_breakdown")
     if isinstance(nos_stars, dict) and nos_stars.get("total_stars") is not None and nos_stars.get("total_stars", 0) > 0:
         sel = nos_stars.get("selection_stars", 0)
@@ -991,7 +1296,9 @@ def extract_explicit_score_from_data(data: dict) -> str:
         tot = nos_stars.get("total_stars", 0)
         return f"{tot}/9 Stars (Selection: {sel}★ | Comparability: {comp}★ | Outcome: {out}★) — {verdict}"
 
-    # 2. Check for explicit arithmetic in deep_dive
+    if "AGREE" in tool_name and data.get("agree_scaled_percentage") is not None:
+        return f"{data.get('agree_scaled_percentage')}% Standardized AGREE II Score — {verdict}"
+
     arith = data.get("arithmetic_breakdown")
     if isinstance(arith, dict) and arith.get("final_tally"):
         return f"{arith.get('final_tally')} — {verdict}"
@@ -1005,27 +1312,25 @@ def extract_explicit_score_from_data(data: dict) -> str:
                 match = re.search(r"\b([0-2])\b", r_str)
                 if match:
                     total_points += int(match.group(1))
+                elif "not met" in r_str or "no" in r_str:
+                    total_points += 0
+                elif "partial" in r_str:
+                    total_points += 1
                 else:
-                    if "not met" in r_str or "no" in r_str or "absent" in r_str:
-                        total_points += 0
-                    elif "partially" in r_str or "partial" in r_str:
-                        total_points += 1
-                    elif "completely" in r_str or "yes" in r_str or "met" in r_str:
-                        total_points += 2
+                    total_points += 2
             return f"{total_points}/12 Points — {verdict}"
 
         elif "AMSTAR" in tool_name or "ROB" in tool_name or "QUADAS" in tool_name:
             ratings = [str(d.get("rating", "")).lower() for d in domains]
-            low_count = sum(1 for r in ratings if ("low" in r or "yes" in r or "met" in r) and "not" not in r)
-            some_concerns = sum(1 for r in ratings if "some" in r or "moderate" in r or "partially" in r or "unclear" in r)
-            high_count = sum(1 for r in ratings if "high" in r or "serious" in r or "critical" in r or "not met" in r or "no" in r)
-            return f"Low: {low_count} | Concerns: {some_concerns} | High/Crit: {high_count} (of {len(domains)} Domains) — {verdict}"
+            low_count = sum(1 for r in ratings if ("low" in r or "yes" in r or "met" in r) and "not" not in r and "partial" not in r)
+            some_concerns = sum(1 for r in ratings if "some" in r or "moderate" in r or "partial" in r or "unclear" in r)
+            high_count = sum(1 for r in ratings if "high" in r or "serious" in r or "critical" in r or "not met" in r or r == "no")
+            return f"Compliant/Low: {low_count} | Partial/Concerns: {some_concerns} | Deficient/High: {high_count} (of {len(domains)} Domains) — {verdict}"
 
     return verdict
 
 
 def resolve_tool_scoring_guide(data: dict) -> Tuple[str, str, str, str, str, str]:
-    """Helper to ensure scoring criteria, individual score interpretations, and tool names are fully populated."""
     tool_meta = data.get("tool_meta") or {}
     acronym = tool_meta.get("acronym") or data.get("appraisal_tool_selected", "Tool")
     full_name = tool_meta.get("full_name") or "Standard Critical Appraisal Instrument"
@@ -1037,16 +1342,12 @@ def resolve_tool_scoring_guide(data: dict) -> Tuple[str, str, str, str, str, str
     raw_design = str(data.get("study_design", "")).lower()
     for design_key, tool_info in SEED_TAXONOMY.items():
         if design_key.lower() in raw_design or raw_design in design_key.lower():
-            if not full_name or full_name == "Standard Critical Appraisal Instrument":
-                full_name = tool_info.get("full_name", full_name)
-            if not purpose or "Standardized epidemiological" in purpose:
-                purpose = tool_info.get("purpose", purpose)
-            if not scoring_rules or "Standard qualitative" in scoring_rules:
-                scoring_rules = tool_info.get("scale", scoring_rules)
-            if not score_interpretation:
-                score_interpretation = tool_info.get("score_interpretation", "")
-            if not scoring_guide:
-                scoring_guide = tool_info.get("scoring_guide", "")
+            full_name = tool_info.get("full_name", full_name)
+            purpose = tool_info.get("purpose", purpose)
+            scoring_rules = tool_info.get("scale", scoring_rules)
+            score_interpretation = tool_info.get("score_interpretation", score_interpretation)
+            scoring_guide = tool_info.get("scoring_guide", scoring_guide)
+            acronym = tool_info.get("tool", acronym)
             break
 
     return acronym, full_name, purpose, scoring_rules, score_interpretation, scoring_guide
@@ -1059,36 +1360,28 @@ def execute_manuscript_evaluation(
     assigned_design: Optional[str] = None,
     active_tools_map: Optional[dict] = None,
     strictness_mode: str = "Strict",
-    classification_trace: Optional[dict] = None,
+    self_audit_report: Optional[dict] = None,
 ) -> dict:
     active_tool_taxonomy = {assigned_design: active_tools_map[assigned_design]} if (assigned_design and active_tools_map and assigned_design in active_tools_map) else (active_tools_map or SEED_TAXONOMY)
+    mandatory_tool_name = active_tools_map[assigned_design]["tool"] if (assigned_design and active_tools_map and assigned_design in active_tools_map) else "Assigned Tool"
     taxonomy_json = json.dumps(active_tool_taxonomy, indent=2)
 
     system_instruction = f"""
-    You are an objective epidemiological auditor. Apply gold-standard criteria rigorously.
-    Appraisal Framework Assigned:
+    You are an objective epidemiological auditor.
+    MANDATORY ARCHITECTURE: "{assigned_design}"
+    MANDATORY APPRAISAL TOOL: "{mandatory_tool_name}"
+
+    You MUST evaluate the manuscript using ONLY the domains listed in this schema:
     {taxonomy_json}
 
-    CORE ADJUDICATION PRINCIPLE:
-    Absence of reporting must be recorded as 'Unclear Risk' or 'Not Reported' unless the tool explicitly mandates documented evidence for compliance.
+    DO NOT substitute another tool or invent domains from another instrument.
 
-    SPECIALIZED NOS SCORING:
-    If using Newcastle-Ottawa Scale (NOS), calculate exact star counts: Selection (0-4), Comparability (0-2), Outcome/Exposure (0-3), Total (0-9).
-
-    AUTHORS CITATION FORMAT:
-    Extract up to 3 primary authors in Harvard format (e.g. 'Smith, J. et al.').
-
-    DOMAIN EVALUATION RULE:
-    For EVERY domain:
-    - `evaluation_question`: State the EXACT, specific question in plain English.
-    - `rating`: State the specific score (e.g. 'Score 2 (Met)', 'Score 0 (Not Met)', 'Low Risk', '★ Awarded').
-    - `critique`: Explain clearly what happened in the paper and why that score was awarded.
-
-    METHODOLOGICAL SYNTHESIS:
-    Provide 4 to 6 clear bullet points in simple, accessible language (Study Setup, Strengths, Risks of Bias, Limitations, Bottom-Line).
-
-    STORY-LIKE NARRATIVE ARC (4 TO 10 BULLETS):
-    Provide chronological narrative steps from Act I to Act V.
+    DOMAIN RATING RULES:
+    - If tool is AGREE II: Score each domain from 1 to 7 (e.g., 'Score 6 / 7').
+    - If tool is SANRA: Score each domain 0, 1, or 2 (e.g., 'Score 2 (Yes / Completely Met)', 'Score 1 (Partially Met)', 'Score 0 (No / Not Met)').
+    - If tool is NOS: Award stars for each domain (e.g., '3/4 Stars (★★★)').
+    - If tool is AMSTAR 2: Rate each domain 'Yes', 'Partial Yes', or 'No'.
+    - If tool is Cochrane RoB 2 / ROBINS-I / QUADAS-2 / PROBAST: Rate 'Low Risk', 'Some Concerns', or 'High Risk'.
 
     CRITICAL: Output ONLY a valid JSON object matching:
     {{
@@ -1097,8 +1390,8 @@ def execute_manuscript_evaluation(
       "journal": "Journal Name",
       "year_published": "YYYY",
       "doi": "DOI or URL",
-      "study_design": "{assigned_design or 'Identified design'}",
-      "appraisal_tool_selected": "Tool name",
+      "study_design": "{assigned_design}",
+      "appraisal_tool_selected": "{mandatory_tool_name}",
       "ratings_summary": {{
         "methodology_quality": "GOOD / FAIR / POOR",
         "reporting_quality": "GOOD / FAIR / POOR",
@@ -1110,7 +1403,7 @@ def execute_manuscript_evaluation(
         "outcome_stars": 0,
         "total_stars": 0
       }},
-      "overall_verdict": "Low Risk / Moderate Risk / High Risk / Recommended / etc.",
+      "overall_verdict": "Overall rating",
       "overall_synthesis": [
         "Study Setup: [Plain language summary]",
         "Methodological Strengths: [What was done well]",
@@ -1126,18 +1419,18 @@ def execute_manuscript_evaluation(
         "verdict_derivation": "Justification"
       }},
       "tool_meta": {{
-        "acronym": "Tool",
+        "acronym": "{mandatory_tool_name}",
         "full_name": "Full Name",
         "purpose": "Purpose",
         "scoring_rules": "Rules",
-        "score_interpretation": "Explicit definition of each score point (e.g. 0 = No/Not Met, 1 = Partially Met, 2 = Yes/Met)",
+        "score_interpretation": "Explicit definition of each score point",
         "scoring_guide": "Grading explanation"
       }},
       "domain_appraisals": [
         {{
-          "domain_name": "Title",
+          "domain_name": "Exact Domain Name from Schema",
           "evaluation_question": "Plain-English question",
-          "rating": "Rating with score level",
+          "rating": "Score / Rating",
           "location_reference": "Section/Page",
           "verbatim_evidence": "Quote",
           "critique": "Explanation"
@@ -1146,9 +1439,10 @@ def execute_manuscript_evaluation(
     }}
     """
 
-    clean_text = trim_manuscript_body(text_content) if text_content else ""
-    contents = [f"PAPER CONTENT:\n{clean_text}\n\nExecute appraisal and return JSON."] if (clean_text and len(clean_text.strip()) > 150) else (
-        [types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf"), f"Appraise for {assigned_design}."] if raw_pdf_bytes else None
+    sections = parse_manuscript_sections(text_content) if text_content else {}
+    clean_text = sections.get("body_no_refs", text_content) if text_content else ""
+    contents = [f"PAPER CONTENT:\n{clean_text}\n\nExecute appraisal under {mandatory_tool_name} and return JSON."] if (clean_text and len(clean_text.strip()) > 150) else (
+        [types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf"), f"Appraise for {assigned_design} using {mandatory_tool_name}."] if raw_pdf_bytes else None
     )
     if not contents:
         raise ValueError("No valid manuscript text or PDF bytes supplied.")
@@ -1175,15 +1469,30 @@ def execute_manuscript_evaluation(
                 if "authors" in parsed:
                     parsed["authors"] = format_harvard_authors(parsed["authors"], max_authors=3)
 
-                # Deterministically compute mathematical score totals
-                parsed = reconcile_appraisal_scores(parsed)
+                # 1. Deterministic Score Reconciliation
+                parsed = reconcile_appraisal_scores(parsed, assigned_design=assigned_design)
 
-                if classification_trace:
-                    if "audit_log" not in parsed:
-                        parsed["audit_log"] = {}
-                    parsed["audit_log"]["classification_trace"] = classification_trace
+                # 2. Framework Consistency Auditor (Hard Fails + Soft Warnings + Source Verification)
+                passed_notes, auditor_warnings = validate_framework_signature_and_legality(
+                    assigned_design or parsed.get("study_design", ""),
+                    parsed.get("appraisal_tool_selected", ""),
+                    parsed.get("domain_appraisals", []),
+                    clean_text
+                )
+
+                parsed.setdefault("audit_log", {})["consistency_auditor_notes"] = passed_notes
+                parsed["audit_log"]["consistency_auditor_warnings"] = auditor_warnings
+                if self_audit_report:
+                    parsed["audit_log"]["classification_decision_tree"] = self_audit_report.get("decision_tree", [])
+                    parsed["audit_log"]["self_audit_report"] = self_audit_report
 
                 return parsed
+            except ClassificationConsistencyError as ce:
+                raise ce
+            except (json.JSONDecodeError, KeyError, ValueError) as parse_err:
+                last_exception = parse_err
+                time.sleep(1.0)
+                continue
             except Exception as e:
                 last_exception = e
                 err_str = str(e)
@@ -1194,11 +1503,11 @@ def execute_manuscript_evaluation(
                     break
                 time.sleep(1.0)
 
-    raise RuntimeError(f"Appraisal pipeline failed on all free models. Details: {str(last_exception)}")
+    raise RuntimeError(f"Appraisal pipeline failed on active models. Details: {str(last_exception)}")
 
 
 # ==========================================
-# 5. FORENSIC DEEP-DIVE GENERATOR (PUBLISHING/ACADEMIC RIGOUR)
+# 5. FORENSIC DEEP-DIVE GENERATOR
 # ==========================================
 def generate_forensic_deep_dive(
     client: genai.Client,
@@ -1208,8 +1517,7 @@ def generate_forensic_deep_dive(
     locked_tool = base_data.get("appraisal_tool_selected", "Assigned Tool")
     locked_design = base_data.get("study_design", "Assigned Design")
     base_domains = base_data.get("domain_appraisals", [])
-    overall_verdict = base_data.get("overall_verdict", "")
-    nos_stars = base_data.get("nos_score_breakdown", {})
+    explicit_score = extract_explicit_score_from_data(base_data)
     audit_trail = base_data.get("audit_log", {})
 
     short_context = full_text[:8000] if full_text else ""
@@ -1220,12 +1528,10 @@ def generate_forensic_deep_dive(
     IMMUTABLE FRAMEWORK CONSTRAINT:
     - YOU MUST AUDIT THIS PAPER UNDER THE EXACT ASSIGNED TOOL: "{locked_tool}" ({locked_design}).
     - DO NOT switch or reclassify this tool under any circumstances.
-    - Base Verdict: {overall_verdict}
+    - Verified Score & Verdict: {explicit_score}
     - Base Evaluated Domains:
     {json.dumps(base_domains, indent=1)}
-    - Base NOS Star Breakdown (if applicable):
-    {json.dumps(nos_stars)}
-    - Classification Pathway & Ensemble Audit:
+    - Self-Audit & Decision Tree:
     {json.dumps(audit_trail, indent=1)}
 
     MANUSCRIPT CONTEXT EXCERPT:
@@ -1234,18 +1540,14 @@ def generate_forensic_deep_dive(
     AUDIT OBJECTIVES & REQUIREMENTS (PUBLISHING-GRADE RIGOUR):
     1. TOOL SELECTION RATIONALE & COMPARATIVE REJECTION ALGORITHM:
        - Explain with formal academic reasoning why "{locked_tool}" was methodologically mandated for this manuscript architecture ({locked_design}).
-       - Document the explicit algorithmic filtering steps and rejection criteria for competing tools (e.g., why AMSTAR 2 over SANRA; why NOS Cohort over cross-sectional AXIS or randomized RoB 2; or why ROBINS-I was necessary).
+       - Document the explicit algorithmic filtering steps and rejection criteria for competing tools.
     2. EXPLICIT SCORE INTERPRETATION & ARITHMETIC DERIVATIONS:
-       - Detail what each individual score level means for this specific tool (e.g. for SANRA: 0 = No/Not Met, 1 = Partially Met, 2 = Yes/Met; for NOS: 1 Star = Compliant, 0 Star = Deficient; for RoB 2: Low Risk vs Some Concerns vs High Risk).
-       - Show the exact arithmetic derivation leading to the final score and verdict.
-       - If Newcastle-Ottawa Scale: Detail Selection (X/4) + Comparability (Y/2) + Outcome (Z/3) = Total Stars / 9, plus scaled percentage.
-       - If Cochrane RoB 2 / AMSTAR 2 / ROBINS-I / QUADAS-2: Calculate the exact proportion of Low Risk vs High Risk vs Some Concerns, count critical domain violations, and demonstrate the decision gate threshold.
-       - If AGREE II: Calculate (Obtained Score - Minimum) / (Maximum - Minimum) × 100%.
+       - Detail what each individual score level means for "{locked_tool}".
+       - Show the exact arithmetic derivation leading to "{explicit_score}".
     3. ZERO RISK-OF-BIAS BOILERPLATE:
-       - Strip all generic textbook filler. Do NOT write generic explanations like 'Randomization balances confounders'.
-       - Jump directly to concrete empirical facts: exact sample sizes, attrition percentages, confidence intervals, unmeasured covariates, selective reporting, or follow-up timelines.
+       - Strip all generic textbook filler. Jump directly to concrete empirical facts from the paper.
     4. AT LEAST 2 TO 3 SUBSTANTIVE CONTENT CRITICISMS:
-       - Detail deep, specific methodological vulnerabilities (e.g., immortal time bias, confounding by indication, survivorship bias, underpowered sample, surrogate vs hard endpoint discordance).
+       - Detail deep, specific methodological vulnerabilities.
     5. DETAILED DOMAIN AUTOPSY:
        - Walk through each domain evaluated, providing forensic empirical observations and statistical impact.
 
@@ -1258,14 +1560,14 @@ def generate_forensic_deep_dive(
         "competing_tools_rejected": "Comparison against other instruments and algorithmic rules explaining why each was rejected."
       }},
       "scoring_system_breakdown": {{
-        "individual_score_meanings": "Explicit breakdown of what each grade or point means (e.g., 0 = No, 1 = Partial, 2 = Yes).",
+        "individual_score_meanings": "Explicit breakdown of what each grade or point means.",
         "how_scores_are_awarded": "Step-by-step description of how domain points are aggregated under {locked_tool}.",
         "quality_thresholds": "What specific scores indicate High, Moderate, or Poor quality under this instrument."
       }},
       "arithmetic_breakdown": {{
         "formula_used": "Exact mathematical equation or grading rule",
         "step_by_step_calculation": "Step-by-step arithmetic derivation",
-        "final_tally": "Numerical score, star ratio, or percentage"
+        "final_tally": "{explicit_score}"
       }},
       "substantive_criticisms": [
         {{
@@ -1311,6 +1613,8 @@ def generate_forensic_deep_dive(
                 raw = re.sub(r"^```(?:json)?\n", "", raw)
                 raw = re.sub(r"\n```$", "", raw)
             return json.loads(raw)
+        except (json.JSONDecodeError, KeyError):
+            continue
         except Exception:
             continue
 
@@ -1343,7 +1647,7 @@ def build_docx_report(data: dict) -> io.BytesIO:
         ("Tool Applied:", f"{full_name} ({acronym})"),
         ("Quality Score / Star Tally:", explicit_score),
         ("Methodology / Reporting / Certainty:", f"{ratings.get('methodology_quality', 'N/A')} / {ratings.get('reporting_quality', 'N/A')} / {ratings.get('certainty_score', 'N/A')}"),
-        ("Evidence Groundedness:", f"{data.get('groundedness_score', 100.0)}%"),
+        ("Evidence Groundedness:", f"{data.get('groundedness_score', 0.0)}%"),
     ]
     for idx, (label, val) in enumerate(fields):
         row = meta_table.rows[idx]
@@ -1469,13 +1773,12 @@ def build_pdf_report(data: dict) -> io.BytesIO:
         active_tier = "YELLOW"
     else:
         v = str(data.get("overall_verdict", "")).lower()
-        active_tier = "GREEN" if any(w in v for w in ["low risk", "recommended"]) else ("RED" if any(w in v for w in ["high risk", "critical"]) else "YELLOW")
+        active_tier = "GREEN" if any(w in v for w in ["low risk", "strongly recommended", "good quality", "high quality"]) else ("RED" if any(w in v for w in ["high risk", "critical", "not recommended", "poor"]) else "YELLOW")
 
     harvard_authors = format_harvard_authors(data.get("authors", "Not Specified"), max_authors=3)
     explicit_score = extract_explicit_score_from_data(data)
     acronym, full_name, purpose, scoring_rules, score_interpretation, scoring_guide = resolve_tool_scoring_guide(data)
 
-    # 1. Compact Header Metadata Bar (Green-Themed)
     meta_data = [
         [
             Paragraph(f"<b>Title:</b> {data.get('paper_title', 'N/A')}", body_style),
@@ -1487,7 +1790,7 @@ def build_pdf_report(data: dict) -> io.BytesIO:
         ],
         [
             Paragraph(f"<b>Quality Triad:</b> Method: <b>{ratings.get('methodology_quality', 'N/A')}</b> | Report: <b>{ratings.get('reporting_quality', 'N/A')}</b> | Certainty: <b>{ratings.get('certainty_score', 'N/A')}</b>", body_style),
-            Paragraph(f"<b>Evidence Groundedness:</b> {data.get('groundedness_score', 100.0)}%", body_style),
+            Paragraph(f"<b>Consistency Audit:</b> Verified Legal Pair ({data.get('groundedness_score', 0.0)}% Grounded)", body_style),
         ]
     ]
     t_meta = Table(meta_data, colWidths=[4.2 * inch, 3.4 * inch])
@@ -1501,7 +1804,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_meta)
     story.append(Spacer(1, 6))
 
-    # 2. Visual Tier Banner (Green Themed)
     r_txt = "<b>✓ HIGH RISK / POOR</b>" if active_tier == "RED" else "HIGH RISK / POOR"
     y_txt = "<b>✓ MODERATE / FAIR</b>" if active_tier == "YELLOW" else "MODERATE / FAIR"
     g_txt = "<b>✓ ROBUST / GOOD</b>" if active_tier == "GREEN" else "ROBUST / GOOD"
@@ -1525,7 +1827,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_gauge)
     story.append(Spacer(1, 6))
 
-    # 3. Two-Column Box: Practical Takeaways & Methodological Synthesis (Green Box)
     takeaways = data.get("practical_takeaways", [])
     synth = data.get("overall_synthesis", [])
     col_left = [Paragraph("<b>💡 Key Practical Takeaways</b>", sec_heading)]
@@ -1555,7 +1856,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_split)
     story.append(Spacer(1, 8))
 
-    # 4. Domain-by-Domain Evaluation Table (Green Accents)
     story.append(Paragraph(f"<b>Domain-by-Domain Evaluation & Core Questions ({acronym})</b>", sec_heading))
     domain_data = [[Paragraph("Domain & Specific Question", header_style), Paragraph("Score", header_style), Paragraph("Plain-English Assessment & Grounded Evidence", header_style)]]
     for d in data.get("domain_appraisals", []):
@@ -1588,7 +1888,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_domains)
     story.append(Spacer(1, 8))
 
-    # 5. Guaranteed Tool Grading & Scoring Criteria Explanation (Green-Themed)
     story.append(Paragraph("<b>Appraisal Framework & Grading System Explanation</b>", sec_heading))
     
     scoring_blocks = []
@@ -1634,10 +1933,6 @@ def build_pdf_report(data: dict) -> io.BytesIO:
 
 
 def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
-    """
-    Detailed, publication-grade academic forensic appraisal.
-    Entirely themed in elegant sage/seafoam green (#2C5247, #78BBA6, #EBF5F2).
-    """
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -1674,7 +1969,6 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     calc_tally = arith.get("final_tally") or explicit_score
     acronym, full_name, purpose, scoring_rules, score_interpretation, scoring_guide = resolve_tool_scoring_guide(base_data)
 
-    # 1. Header Metadata Bar (Green-Themed)
     meta_data = [
         [Paragraph(f"<b>Manuscript:</b> {base_data.get('paper_title', 'N/A')}", body_style), Paragraph(f"<b>Authors:</b> {harvard_authors} ({base_data.get('year_published', 'N/A')})", body_style)],
         [Paragraph(f"<b>Architecture:</b> {base_data.get('study_design', 'N/A')} | <b>Tool:</b> {full_name} ({acronym})", body_style), Paragraph(f"<b>Verified Score:</b> <font color='#1D3B32'><b>{calc_tally}</b></font>", bold_style)],
@@ -1690,7 +1984,6 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(t_meta)
     story.append(Spacer(1, 8))
 
-    # 2. Tool Selection & Comparative Rationale (Green-Themed)
     story.append(Paragraph("<b>1. Methodological Tool Selection & Algorithmic Rejection Rationale</b>", sec_heading))
     rationale = deep_dive.get("tool_selection_rationale", {})
     t_rat_data = [
@@ -1711,7 +2004,6 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(t_rat)
     story.append(Spacer(1, 8))
 
-    # 3. Scoring Mechanics & Arithmetic Table (Green-Themed)
     story.append(Paragraph("<b>2. Scoring Mechanics, Arithmetic Derivations & Quality Thresholds</b>", sec_heading))
     scoring_system = deep_dive.get("scoring_system_breakdown", {})
     individual_meanings = scoring_system.get("individual_score_meanings") or score_interpretation
@@ -1739,7 +2031,6 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(t_arith)
     story.append(Spacer(1, 8))
 
-    # 4. Substantive Content Criticisms Table (Green-Themed)
     story.append(Paragraph("<b>3. Substantive Content Criticisms & Methodological Vulnerabilities</b>", sec_heading))
     crit_rows = [[Paragraph("Identified Deficit & Mechanism", header_style), Paragraph("Manuscript Empirical Data / Line Citations", header_style), Paragraph("Scientific & Epidemiological Threat", header_style)]]
     for c in deep_dive.get("substantive_criticisms", []):
@@ -1762,7 +2053,6 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(t_crit)
     story.append(Spacer(1, 8))
 
-    # 5. Domain Deep Dive (Green-Themed)
     story.append(Paragraph("<b>4. Domain-by-Domain Forensic Audit (Boilerplate-Free)</b>", sec_heading))
     d_rows = [[Paragraph("Domain Evaluated", header_style), Paragraph("Score", header_style), Paragraph("Direct Empirical Finding in Manuscript", header_style), Paragraph("Identified Design / Statistical Vulnerability", header_style)]]
     for d in deep_dive.get("domain_deep_dives", []):
@@ -1786,7 +2076,6 @@ def build_deep_dive_pdf_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     story.append(t_d)
     story.append(Spacer(1, 8))
 
-    # 6. Translational Advisory Box (Green-Themed)
     adv = deep_dive.get("translational_verdict_and_advisory", "")
     if adv:
         story.append(Paragraph("<b>5. Translational Clinical Advisory & Adoption Verdict</b>", sec_heading))
@@ -1824,14 +2113,12 @@ def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     p_meta.add_run(f"Architecture: {base_data.get('study_design')} | Gold-Standard Tool: {full_name} ({acronym})\n")
     p_meta.add_run(f"Verified Tool Score / Tally: {calc_tally}").bold = True
 
-    # 1. Rationale
     doc.add_heading("1. Methodological Tool Selection & Comparative Justification", level=1)
     rat = deep_dive.get("tool_selection_rationale", {})
     doc.add_paragraph(f"Mandated Tool: {rat.get('assigned_tool', acronym)} ({rat.get('architecture_classification', base_data.get('study_design'))})")
     doc.add_paragraph(f"Selection Justification:\n{rat.get('selection_justification')}")
     doc.add_paragraph(f"Alternative Frameworks Rejected & Algorithmic Rules:\n{rat.get('competing_tools_rejected')}")
 
-    # 2. Arithmetic
     doc.add_heading("2. Scoring Mechanics, Mathematical Derivations & Score Interpretation", level=1)
     scoring_system = deep_dive.get("scoring_system_breakdown", {})
     doc.add_paragraph(f"Meaning of Individual Domain Scores:\n{scoring_system.get('individual_score_meanings', score_interpretation)}")
@@ -1842,7 +2129,6 @@ def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
     p_fin = doc.add_paragraph()
     p_fin.add_run(f"Final Calculated Score / Tally: {calc_tally}").bold = True
 
-    # 3. Content Criticisms
     doc.add_heading("3. Substantive Content Criticisms & Flaw Analysis", level=1)
     for idx, c in enumerate(deep_dive.get("substantive_criticisms", []), 1):
         p_c = doc.add_paragraph(style='List Bullet')
@@ -1850,7 +2136,6 @@ def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
         p_c.add_run(f"{c.get('manuscript_evidence')}\n")
         p_c.add_run(f"Epidemiological Threat: {c.get('epidemiological_impact')}")
 
-    # 4. Domain Audit
     doc.add_heading("4. Domain-by-Domain Forensic Audit (Boilerplate-Free)", level=1)
     table = doc.add_table(rows=1, cols=4)
     table.style = "Table Grid"
@@ -1870,7 +2155,6 @@ def build_deep_dive_docx_report(base_data: dict, deep_dive: dict) -> io.BytesIO:
         row[2].paragraphs[0].add_run(d.get("direct_empirical_finding", ""))
         row[3].paragraphs[0].add_run(d.get("statistical_or_design_flaw", ""))
 
-    # 5. Advisory
     adv = deep_dive.get("translational_verdict_and_advisory", "")
     if adv:
         doc.add_heading("5. Translational Clinical Advisory & Adoption Verdict", level=1)
@@ -1911,7 +2195,7 @@ def answer_interrogation_query(
             return response.text
         except Exception:
             continue
-    return f"Failed to query {ASSISTANT_NAME} across all active models."
+    return f"Failed to query {ASSISTANT_NAME} across active models."
 
 
 # ==========================================
@@ -1939,14 +2223,6 @@ st.markdown(
     .stButton>button:active, .stDownloadButton>button:active {
         background-color: #4A8574 !important;
     }
-    .deepdive-box {
-        background-color: #EBF5F2;
-        border: 1px solid #78BBA6;
-        border-radius: 8px;
-        padding: 12px;
-        margin-top: 10px;
-        margin-bottom: 10px;
-    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -1966,377 +2242,398 @@ if not st.session_state["authenticated"]:
             st.rerun()
         else:
             st.error("Invalid passcode.")
-    st.stop()
+else:
+    st.title(f"🐱 {APP_NAME}")
+    st.caption("Epidemiological Critical Appraisal & Hierarchical Consistency Auditor")
 
-st.title(f"🐱 {APP_NAME}")
-st.caption("Epidemiological Critical Appraisal & Evidence Verification Engine")
+    api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None))
 
-api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", None))
+    if "history_limit" not in st.session_state:
+        st.session_state["history_limit"] = 10
+    if "chat_history" not in st.session_state:
+        st.session_state["chat_history"] = []
+    if "raw_paper_text" not in st.session_state:
+        st.session_state["raw_paper_text"] = ""
+    if "deep_dive_data" not in st.session_state:
+        st.session_state["deep_dive_data"] = None
 
-if "history_limit" not in st.session_state:
-    st.session_state["history_limit"] = 10
-if "chat_history" not in st.session_state:
-    st.session_state["chat_history"] = []
-if "raw_paper_text" not in st.session_state:
-    st.session_state["raw_paper_text"] = ""
-if "deep_dive_data" not in st.session_state:
-    st.session_state["deep_dive_data"] = None
+    with st.sidebar:
+        st.header("⚙️ Configuration")
+        if not api_key:
+            api_key = st.text_input("Service Access Key", type="password")
+        else:
+            st.success("Access Credential Active")
 
-with st.sidebar:
-    st.header("⚙️ Configuration")
-    if not api_key:
-        api_key = st.text_input("Service Access Key", type="password")
-    else:
-        st.success("Access Credential Active")
+        strictness_choice = st.radio(
+            "Adjudication Strictness:",
+            options=["Strict (Zero Benefit of Doubt)", "Auditor / Forensic (Zero Tolerance)"],
+            index=0,
+        )
 
-    strictness_choice = st.radio(
-        "Adjudication Strictness:",
-        options=["Strict (Zero Benefit of Doubt)", "Auditor / Forensic (Zero Tolerance)"],
-        index=0,
-    )
+        if st.button("Log Out"):
+            st.session_state["authenticated"] = False
+            st.rerun()
 
-    if st.button("Log Out"):
-        st.session_state["authenticated"] = False
-        st.rerun()
+        st.markdown("---")
+        st.header("🗄️ Past Appraisals")
+        records = get_all_appraisals()
+        if not records:
+            st.caption("No saved records.")
+        else:
+            for r in records[:st.session_state["history_limit"]]:
+                short_title = r["paper_title"][:34] + "..." if len(r["paper_title"]) > 34 else r["paper_title"]
+                st.markdown(f"**{short_title}**\n<small>{r['created_at'][:10]} · {r['tool_selected']}</small>", unsafe_allow_html=True)
+                c_load, c_del = st.columns([3, 1])
+                with c_load:
+                    if st.button("Load", key=f"v_{r['id']}", use_container_width=True):
+                        st.session_state["appraisal_data"] = get_appraisal_by_id(r["id"])
+                        st.session_state["deep_dive_data"] = None
+                        st.session_state["chat_history"] = []
+                        st.rerun()
+                with c_del:
+                    if st.button("🗑️", key=f"d_{r['id']}", use_container_width=True):
+                        delete_appraisal(r["id"])
+                        st.rerun()
+                st.markdown("<hr style='margin: 4px 0;'/>", unsafe_allow_html=True)
+
+            if len(records) > 10:
+                if st.session_state["history_limit"] == 10:
+                    if st.button("Show More (50)"):
+                        st.session_state["history_limit"] = 50
+                        st.rerun()
+                else:
+                    if st.button("Show Less (10)"):
+                        st.session_state["history_limit"] = 10
+                        st.rerun()
+
+    tab_pdf, tab_url = st.tabs(["📤 Upload PDF", "🔗 Enter Link / DOI"])
+    paper_text = ""
+    raw_pdf_bytes = None
+    filename_tag = "Paper"
+
+    with tab_pdf:
+        uploaded = st.file_uploader("Upload Manuscript PDF", type=["pdf"])
+        if uploaded:
+            raw_pdf_bytes = uploaded.read()
+            filename_tag = uploaded.name
+            with st.spinner("Extracting text & isolating structural sections..."):
+                paper_text = extract_text_from_pdf_bytes(raw_pdf_bytes)
+            if paper_text:
+                st.session_state["raw_paper_text"] = paper_text
+                st.success(f"Parsed {len(paper_text):,} characters successfully.")
+            else:
+                st.warning("Could not extract readable text. Image OCR fallback pipeline active.")
+
+    with tab_url:
+        url_input = st.text_input("Article Link or DOI")
+        if st.button("Fetch Article"):
+            if url_input.strip():
+                with st.spinner("Retrieving text..."):
+                    try:
+                        paper_text = extract_text_from_url(url_input.strip())
+                        st.session_state["raw_paper_text"] = paper_text
+                        filename_tag = "Web_Article"
+                        st.success(f"Retrieved {len(paper_text):,} characters.")
+                    except Exception as e:
+                        st.error(f"Error fetching URL: {e}")
+
+    active_tools = get_all_tools()
+    available_designs = list(active_tools.keys()) + ["🔍 Auto-Detect & Discover Tool (If not in list)"]
+
+    self_audit_report = {}
+    ensemble_winner = "Observational Study (Cohort)"
+    confidence_score = 1.0
+
+    if paper_text:
+        client_preflight = genai.Client(api_key=api_key) if api_key else None
+        self_audit_report = run_framework_consistency_auditor(paper_text, client_preflight, available_designs)
+        ensemble_winner = self_audit_report["design"]
+        confidence_score = self_audit_report["confidence"]
 
     st.markdown("---")
-    st.header("🗄️ Past Appraisals")
-    records = get_all_appraisals()
-    if not records:
-        st.caption("No saved records.")
-    else:
-        for r in records[:st.session_state["history_limit"]]:
-            short_title = r["paper_title"][:34] + "..." if len(r["paper_title"]) > 34 else r["paper_title"]
-            st.markdown(f"**{short_title}**\n<small>{r['created_at'][:10]} · {r['tool_selected']}</small>", unsafe_allow_html=True)
-            c_load, c_del = st.columns([3, 1])
-            with c_load:
-                if st.button("Load", key=f"v_{r['id']}", use_container_width=True):
-                    st.session_state["appraisal_data"] = get_appraisal_by_id(r["id"])
+
+    col_d1, col_d2 = st.columns([3, 1])
+    with col_d1:
+        default_idx = (
+            available_designs.index(ensemble_winner)
+            if ensemble_winner in available_designs
+            else (len(available_designs) - 1)
+        )
+        selected_design = st.selectbox(
+            "Target Study Architecture & Framework:",
+            options=available_designs,
+            index=default_idx,
+        )
+    with col_d2:
+        conf_badge = f"{int(confidence_score * 100)}%"
+        st.metric("Consistency Confidence", conf_badge)
+
+    can_proceed = True
+
+    if self_audit_report:
+        with st.expander(f"🛡️ Framework Consistency Auditor — {self_audit_report.get('status', 'Verified')}"):
+            st.markdown(f"**Assigned Design:** `{self_audit_report.get('design')}` | **Mandated Tool:** `{self_audit_report.get('tool')}`")
+            st.markdown(f"- **Classifier A (Hierarchical / Section Engine):** {self_audit_report.get('classifier_a_rule_engine')}")
+            st.markdown(f"- **Classifier B (Constrained LLM):** {self_audit_report.get('classifier_b_llm')}")
+            st.markdown("**Classification Decision Tree:**")
+            for step in self_audit_report.get("decision_tree", []):
+                st.markdown(f"  - ✅ {step}")
+            st.markdown("**Excluded Alternatives:**")
+            for ex in self_audit_report.get("excluded_alternatives", []):
+                st.markdown(f"  - ❌ {ex}")
+
+        with st.expander("🔍 Classification & Section Parser Debug View"):
+            prev = self_audit_report.get("sections_preview", {})
+            st.markdown("**Heuristic Probable Title Detected:**")
+            st.code(prev.get("detected_title", "N/A"))
+            st.markdown("**Isolated Title Zone (Top 500 chars):**")
+            st.code(prev.get("title_zone", "N/A"))
+            st.markdown("**Isolated Abstract Zone (Top 500 chars):**")
+            st.code(prev.get("abstract_zone", "N/A"))
+            st.markdown("**Isolated Methods Zone (Top 500 chars):**")
+            st.code(prev.get("methods_zone", "N/A"))
+
+        if self_audit_report.get("requires_human_confirmation"):
+            st.warning(
+                f"⚠️ **Low Confidence Margin or Classifier Split ({int(confidence_score * 100)}%):**\n\n"
+                f"- **Rule Engine:** `{self_audit_report.get('design')}`\n"
+                f"- **LLM Classifier:** `{self_audit_report.get('classifier_b_llm')}`\n\n"
+                f"Please verify the dropdown above and check the box below to unlock execution."
+            )
+            can_proceed = st.checkbox("I have verified the selected Target Study Architecture above.", value=False)
+
+    if st.button("⚡ Run Methodological Appraisal", type="primary", use_container_width=True, disabled=not can_proceed):
+        if not api_key:
+            st.warning("Enter access key in sidebar.")
+        elif not paper_text and not raw_pdf_bytes:
+            st.warning("Upload PDF or enter DOI.")
+        else:
+            client = genai.Client(api_key=api_key)
+            target_design = selected_design
+
+            if target_design == "🔍 Auto-Detect & Discover Tool (If not in list)":
+                with st.spinner("Discovering best appraisal tool..."):
+                    try:
+                        discovered_name, discovered_tool = discover_appraisal_tool(client, paper_text or "Excerpt")
+                        save_discovered_tool(discovered_name, discovered_tool)
+                        target_design = discovered_name
+                        active_tools = get_all_tools()
+                        st.info(f"Adopted tool: **{discovered_tool.get('tool')}**")
+                    except Exception:
+                        target_design = "Observational Study (Cohort)"
+
+            with st.spinner(f"Executing appraisal & verifying framework consistency under {target_design}..."):
+                try:
+                    raw_data = execute_manuscript_evaluation(
+                        client,
+                        text_content=paper_text,
+                        raw_pdf_bytes=raw_pdf_bytes if not paper_text else None,
+                        assigned_design=target_design,
+                        active_tools_map=active_tools,
+                        strictness_mode=strictness_choice,
+                        self_audit_report=self_audit_report,
+                    )
+                    verified_data, score, _, flaw_warns = run_comprehensive_checksum(raw_data, paper_text)
+                    new_id = save_appraisal(verified_data, filename_tag)
+                    st.session_state["appraisal_data"] = verified_data
                     st.session_state["deep_dive_data"] = None
                     st.session_state["chat_history"] = []
+                    st.success(f"Verified by Framework Consistency Auditor and saved (ID: #{new_id})")
                     st.rerun()
-            with c_del:
-                if st.button("🗑️", key=f"d_{r['id']}", use_container_width=True):
-                    delete_appraisal(r["id"])
-                    st.rerun()
-            st.markdown("<hr style='margin: 4px 0;'/>", unsafe_allow_html=True)
-
-        if len(records) > 10:
-            if st.session_state["history_limit"] == 10:
-                if st.button("Show More (50)"):
-                    st.session_state["history_limit"] = 50
-                    st.rerun()
-            else:
-                if st.button("Show Less (10)"):
-                    st.session_state["history_limit"] = 10
-                    st.rerun()
-
-tab_pdf, tab_url = st.tabs(["📤 Upload PDF", "🔗 Enter Link / DOI"])
-paper_text = ""
-raw_pdf_bytes = None
-filename_tag = "Paper"
-
-with tab_pdf:
-    uploaded = st.file_uploader("Upload Manuscript PDF", type=["pdf"])
-    if uploaded:
-        raw_pdf_bytes = uploaded.read()
-        filename_tag = uploaded.name
-        with st.spinner("Extracting text (pypdf + OCR fallback)..."):
-            paper_text = extract_text_from_pdf_bytes(raw_pdf_bytes)
-        if paper_text:
-            st.session_state["raw_paper_text"] = paper_text
-            st.success(f"Parsed {len(paper_text):,} characters successfully.")
-        else:
-            st.warning("Could not extract readable text. Image OCR fallback pipeline active.")
-
-with tab_url:
-    url_input = st.text_input("Article Link or DOI")
-    if st.button("Fetch Article"):
-        if url_input.strip():
-            with st.spinner("Retrieving text..."):
-                try:
-                    paper_text = extract_text_from_url(url_input.strip())
-                    st.session_state["raw_paper_text"] = paper_text
-                    filename_tag = "Web_Article"
-                    st.success(f"Retrieved {len(paper_text):,} characters.")
+                except ClassificationConsistencyError as ce:
+                    st.error(f"🛑 **Framework Consistency Auditor Blocked Report Generation (Hard Fail):**\n\n{ce}")
                 except Exception as e:
-                    st.error(f"Error fetching URL: {e}")
+                    st.error(f"Execution error: {e}")
 
-active_tools = get_all_tools()
-available_designs = list(active_tools.keys()) + ["🔍 Auto-Detect & Discover Tool (If not in list)"]
+    if "appraisal_data" in st.session_state:
+        data = st.session_state["appraisal_data"]
+        st.markdown("---")
+        st.subheader(f"📋 {data.get('paper_title', 'Untitled')}")
 
-ensemble_winner = "Observational Study (Cohort)"
-confidence_score = 1.0
-contradiction_flag = None
-ensemble_data = {}
+        ratings = data.get("ratings_summary", {})
+        harvard_display_authors = format_harvard_authors(data.get("authors", "Not Specified"), max_authors=3)
+        explicit_score = extract_explicit_score_from_data(data)
 
-if paper_text:
-    client_preflight = genai.Client(api_key=api_key) if api_key else None
-    ensemble_data = run_four_source_ensemble(paper_text, client_preflight, available_designs)
-    ensemble_winner = ensemble_data["winner"]
-    confidence_score = ensemble_data["confidence"]
-    contradiction_flag = detect_classification_contradiction(paper_text, ensemble_winner)
+        st.markdown(f"**Authors (Harvard):** {harvard_display_authors} | **Tool Score / Tally:** `{explicit_score}`")
 
-st.markdown("---")
+        auditor_warns = data.get("audit_log", {}).get("consistency_auditor_warnings", [])
+        for w in auditor_warns:
+            st.warning(f"⚠️ **Auditor Advisory:** {w}")
 
-col_d1, col_d2 = st.columns([3, 1])
-with col_d1:
-    default_idx = (
-        available_designs.index(ensemble_winner)
-        if ensemble_winner in available_designs
-        else (len(available_designs) - 1)
-    )
-    selected_design = st.selectbox(
-        "Target Study Architecture & Framework:",
-        options=available_designs,
-        index=default_idx,
-    )
-with col_d2:
-    conf_badge = f"{int(confidence_score * 100)}%"
-    st.metric("Ensemble Confidence", conf_badge)
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Architecture", data.get("study_design"))
+        with c2:
+            st.metric("Tool Applied", data.get("appraisal_tool_selected"))
+        with c3:
+            st.metric("Methodology Quality", ratings.get("methodology_quality", "N/A"))
+        with c4:
+            st.metric("Groundedness", f"{data.get('groundedness_score', 0.0)}%")
 
-if ensemble_data.get("evidence"):
-    override_badge = " [Supreme Signal Override Applied]" if ensemble_data.get("override_applied") else ""
-    with st.expander(f"📋 Classification Evidence & Trace Rationale{override_badge}"):
-        st.markdown(f"**Selected Design:** `{ensemble_winner}`  \n**Consensus Confidence:** `{int(confidence_score * 100)}%`")
-        for pt in ensemble_data["evidence"]:
-            st.markdown(f"- {pt}")
-        if ensemble_data.get("trace"):
-            st.json(ensemble_data["trace"])
+        nos_stars = data.get("nos_score_breakdown")
+        if nos_stars and "total_stars" in nos_stars and nos_stars["total_stars"] > 0:
+            st.info(f"⭐ **Newcastle-Ottawa Scale Star Count:** {nos_stars.get('total_stars', 0)}/9 Stars (Selection: {nos_stars.get('selection_stars', 0)}★ | Comparability: {nos_stars.get('comparability_stars', 0)}★ | Outcome: {nos_stars.get('outcome_stars', 0)}★)")
 
-if contradiction_flag:
-    st.error(f"🛑 **Critical Architecture Conflict Detected:**\n\n{contradiction_flag}\n\n*Appraisal halted to prevent scoring an empirical study with a review framework (or vice versa). Please manually correct the dropdown selection above.*")
-    st.stop()
+        takeaways = data.get("practical_takeaways", [])
+        if takeaways:
+            st.markdown("### 💡 Practical Takeaways from the Paper (At-A-Glance)")
+            for idx, item in enumerate(takeaways, 1):
+                st.markdown(f"**{idx}.** {item}")
 
-if confidence_score < 0.80:
-    st.info("ℹ️ **Confidence Gating (<80%):** Multiple designs detected across ensemble sources. Please confirm or adjust the dropdown selection before proceeding.")
+        story_arc = data.get("narrative_arc_summary", [])
+        if story_arc:
+            st.markdown("### 📖 Narrative Story Arc & Translational Journey")
+            with st.container():
+                for idx, pt in enumerate(story_arc, 1):
+                    parts = pt.split(":", 1)
+                    if len(parts) == 2:
+                        st.markdown(f"**{idx}. {parts[0].strip()}:** {parts[1].strip()}")
+                    else:
+                        st.markdown(f"**{idx}.** {pt}")
 
-if st.button("⚡ Run Methodological Appraisal", type="primary", use_container_width=True):
-    if not api_key:
-        st.warning("Enter access key in sidebar.")
-    elif not paper_text and not raw_pdf_bytes:
-        st.warning("Upload PDF or enter DOI.")
-    else:
-        client = genai.Client(api_key=api_key)
-        target_design = selected_design
+        st.subheader("📊 Domain Analysis")
+        st.dataframe(
+            [
+                {
+                    "Domain": d.get("domain_name"),
+                    "Core Question": d.get("evaluation_question"),
+                    "Score": d.get("rating"),
+                    "Reference": d.get("location_reference"),
+                    "Quote": d.get("verbatim_evidence"),
+                    "Grounding Status": d.get("checksum_status", "Verified"),
+                    "Assessment Critique": d.get("critique"),
+                }
+                for d in data.get("domain_appraisals", [])
+            ],
+            use_container_width=True,
+        )
 
-        if target_design == "🔍 Auto-Detect & Discover Tool (If not in list)":
-            with st.spinner("Discovering best appraisal tool..."):
-                try:
-                    discovered_name, discovered_tool = discover_appraisal_tool(client, paper_text or "Excerpt")
-                    save_discovered_tool(discovered_name, discovered_tool)
-                    target_design = discovered_name
-                    active_tools = get_all_tools()
-                    st.info(f"Adopted tool: **{discovered_tool.get('tool')}**")
-                except Exception:
-                    target_design = "Observational Study (Cohort)"
-
-        with st.spinner(f"Executing rigorous appraisal under {target_design}..."):
-            try:
-                raw_data = execute_manuscript_evaluation(
-                    client,
-                    text_content=paper_text,
-                    raw_pdf_bytes=raw_pdf_bytes if not paper_text else None,
-                    assigned_design=target_design,
-                    active_tools_map=active_tools,
-                    strictness_mode=strictness_choice,
-                    classification_trace=ensemble_data.get("trace"),
-                )
-                verified_data, score, _, flaw_warns = run_comprehensive_checksum(raw_data, paper_text)
-                new_id = save_appraisal(verified_data, filename_tag)
-                st.session_state["appraisal_data"] = verified_data
-                st.session_state["deep_dive_data"] = None
-                st.session_state["chat_history"] = []
-                st.success(f"Completed and saved (ID: #{new_id})")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Execution error: {e}")
-
-if "appraisal_data" in st.session_state:
-    data = st.session_state["appraisal_data"]
-    st.markdown("---")
-    st.subheader(f"📋 {data.get('paper_title', 'Untitled')}")
-
-    ratings = data.get("ratings_summary", {})
-    harvard_display_authors = format_harvard_authors(data.get("authors", "Not Specified"), max_authors=3)
-    explicit_score = extract_explicit_score_from_data(data)
-
-    st.markdown(f"**Authors (Harvard):** {harvard_display_authors} | **Tool Score / Tally:** `{explicit_score}`")
-
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Architecture", data.get("study_design"))
-    with c2:
-        st.metric("Tool Applied", data.get("appraisal_tool_selected"))
-    with c3:
-        st.metric("Methodology Quality", ratings.get("methodology_quality", "N/A"))
-    with c4:
-        st.metric("Certainty Score", ratings.get("certainty_score", "N/A"))
-
-    nos_stars = data.get("nos_score_breakdown")
-    if nos_stars and "total_stars" in nos_stars and nos_stars["total_stars"] > 0:
-        st.info(f"⭐ **Newcastle-Ottawa Scale Star Count:** {nos_stars.get('total_stars', 0)}/9 Stars (Selection: {nos_stars.get('selection_stars', 0)}★ | Comparability: {nos_stars.get('comparability_stars', 0)}★ | Outcome: {nos_stars.get('outcome_stars', 0)}★)")
-
-    takeaways = data.get("practical_takeaways", [])
-    if takeaways:
-        st.markdown("### 💡 Practical Takeaways from the Paper (At-A-Glance)")
-        for idx, item in enumerate(takeaways, 1):
-            st.markdown(f"**{idx}.** {item}")
-
-    story_arc = data.get("narrative_arc_summary", [])
-    if story_arc:
-        st.markdown("### 📖 Narrative Story Arc & Translational Journey")
-        with st.container():
-            for idx, pt in enumerate(story_arc, 1):
+        st.subheader("📝 Methodological Synthesis & Discussion (Plain-English Points)")
+        synth = data.get("overall_synthesis", [])
+        if isinstance(synth, list):
+            for idx, pt in enumerate(synth, 1):
                 parts = pt.split(":", 1)
                 if len(parts) == 2:
-                    st.markdown(f"**{idx}. {parts[0].strip()}:** {parts[1].strip()}")
+                    st.markdown(f"**• {parts[0].strip()}:** {parts[1].strip()}")
                 else:
-                    st.markdown(f"**{idx}.** {pt}")
+                    st.markdown(f"**•** {pt}")
+        else:
+            st.info(str(synth))
 
-    st.subheader("📊 Domain Analysis")
-    st.dataframe(
-        [
-            {
-                "Domain": d.get("domain_name"),
-                "Core Question": d.get("evaluation_question"),
-                "Score": d.get("rating"),
-                "Reference": d.get("location_reference"),
-                "Quote": d.get("verbatim_evidence"),
-                "Assessment Critique": d.get("critique"),
-            }
-            for d in data.get("domain_appraisals", [])
-        ],
-        use_container_width=True,
-    )
+        c_doc, c_pdf, c_log = st.columns(3)
+        with c_doc:
+            st.download_button(
+                "📥 Download Executive Word (.docx)",
+                data=build_docx_report(data),
+                file_name=format_harvard_filename(data, "docx"),
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+            )
+        with c_pdf:
+            st.download_button(
+                "📥 Download Executive PDF (.pdf)",
+                data=build_pdf_report(data),
+                file_name=format_harvard_filename(data, "pdf"),
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        with c_log:
+            audit_payload = json.dumps(data, indent=2)
+            st.download_button(
+                "📥 Download Self-Audit Log (.json)",
+                data=audit_payload,
+                file_name=format_harvard_filename(data, "json"),
+                mime="application/json",
+                use_container_width=True,
+            )
 
-    st.subheader("📝 Methodological Synthesis & Discussion (Plain-English Points)")
-    synth = data.get("overall_synthesis", [])
-    if isinstance(synth, list):
-        for idx, pt in enumerate(synth, 1):
-            parts = pt.split(":", 1)
-            if len(parts) == 2:
-                st.markdown(f"**• {parts[0].strip()}:** {parts[1].strip()}")
+        # --- ADVANCED PUBLICATION-GRADE FORENSIC DEEP-DIVE ---
+        st.markdown("---")
+        st.subheader("🔬 Publication-Grade Forensic Deep-Dive")
+        st.caption("Generates a full peer-review autopsy: tool selection comparative rationale, explicit arithmetic derivations, zero generic boilerplate, and 2–3 substantive content critiques (Seafoam/Green Themed).")
+
+        if st.button("Generate Forensic Deep-Dive Report", type="secondary"):
+            if not api_key:
+                st.error("Access key required.")
             else:
-                st.markdown(f"**•** {pt}")
-    else:
-        st.info(str(synth))
-
-    # Standard Executive Downloads
-    c_doc, c_pdf, c_log = st.columns(3)
-    with c_doc:
-        st.download_button(
-            "📥 Download Executive Word (.docx)",
-            data=build_docx_report(data),
-            file_name=format_harvard_filename(data, "docx"),
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True,
-        )
-    with c_pdf:
-        st.download_button(
-            "📥 Download Executive PDF (.pdf)",
-            data=build_pdf_report(data),
-            file_name=format_harvard_filename(data, "pdf"),
-            mime="application/pdf",
-            use_container_width=True,
-        )
-    with c_log:
-        audit_payload = json.dumps(data, indent=2)
-        st.download_button(
-            "📥 Download Audit Log (.json)",
-            data=audit_payload,
-            file_name=format_harvard_filename(data, "json"),
-            mime="application/json",
-            use_container_width=True,
-        )
-
-    # --- ADVANCED PUBLICATION-GRADE FORENSIC DEEP-DIVE ---
-    st.markdown("---")
-    st.subheader("🔬 Publication-Grade Forensic Deep-Dive")
-    st.caption("Generates a full peer-review autopsy: tool selection comparative rationale, explicit arithmetic derivations, zero generic boilerplate, and 2–3 substantive content critiques (Seafoam/Green Themed).")
-
-    if st.button("Generate Forensic Deep-Dive Report", type="secondary"):
-        if not api_key:
-            st.error("Access key required.")
-        else:
-            client = genai.Client(api_key=api_key)
-            with st.spinner("Executing rigorous mathematical and methodological deep-dive..."):
-                try:
-                    deep_dive_res = generate_forensic_deep_dive(client, data, st.session_state.get("raw_paper_text", ""))
-                    st.session_state["deep_dive_data"] = deep_dive_res
-                    st.success("Publication-grade forensic deep-dive generated.")
-                    st.rerun()
-                except Exception as err:
-                    st.error(f"Error generating deep-dive: {err}")
-
-    if st.session_state.get("deep_dive_data"):
-        dd = st.session_state["deep_dive_data"]
-        with st.container():
-            st.markdown("#### ⚖️ Methodological Tool Selection Rationale & Rejection Rules")
-            rat = dd.get("tool_selection_rationale", {})
-            st.markdown(f"**Mandated Instrument:** `{rat.get('assigned_tool', 'N/A')}`")
-            st.write(rat.get("selection_justification", "N/A"))
-            with st.expander("Comparative Framework Analysis & Rejection Decision Algorithm"):
-                st.write(rat.get("competing_tools_rejected", "N/A"))
-
-            st.markdown("#### 🧮 Individual Score Interpretations & Arithmetic Derivations")
-            scoring_system = dd.get("scoring_system_breakdown", {})
-            st.write(f"**Meaning of Score Levels:**\n{scoring_system.get('individual_score_meanings', 'N/A')}")
-            st.write(f"**Aggregation Logic:**\n{scoring_system.get('how_scores_are_awarded', 'N/A')}")
-            st.write(f"**Quality Thresholds:**\n{scoring_system.get('quality_thresholds', 'N/A')}")
-
-            arith = dd.get("arithmetic_breakdown", {})
-            st.info(f"**Mathematical Rule / Equation:** {arith.get('formula_used', 'N/A')}\n\n**Step-by-Step Calculation:**\n{arith.get('step_by_step_calculation', 'N/A')}\n\n**Final Result:** {arith.get('final_tally', 'N/A')}")
-
-            st.markdown("#### ⚠️ Substantive Content Criticisms")
-            for c in dd.get("substantive_criticisms", []):
-                st.error(f"**{c.get('flaw_title')}:** {c.get('manuscript_evidence')}\n\n*Epidemiological Threat:* {c.get('epidemiological_impact')}")
-
-            adv = dd.get("translational_verdict_and_advisory", "")
-            if adv:
-                st.markdown("#### 🎯 Translational Clinical Advisory")
-                st.success(f"**Clinical Practice Recommendation:** {adv}")
-
-            c_dd_doc, c_dd_pdf = st.columns(2)
-            with c_dd_doc:
-                st.download_button(
-                    "📥 Download Forensic Deep-Dive (.docx)",
-                    data=build_deep_dive_docx_report(data, dd),
-                    file_name=format_harvard_filename(data, "docx", tag="Forensic_Audit"),
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True,
-                )
-            with c_dd_pdf:
-                st.download_button(
-                    "📥 Download Forensic Deep-Dive (.pdf)",
-                    data=build_deep_dive_pdf_report(data, dd),
-                    file_name=format_harvard_filename(data, "pdf", tag="Forensic_Audit"),
-                    mime="application/pdf",
-                    use_container_width=True,
-                )
-
-    st.markdown("---")
-    st.subheader(f"💬 {ASSISTANT_NAME}")
-    for msg in st.session_state["chat_history"]:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    if query := st.chat_input("Ask about specific scores, point rules, or line citations..."):
-        if not api_key:
-            st.error("Key required.")
-        else:
-            st.session_state["chat_history"].append({"role": "user", "content": query})
-            with st.chat_message("user"):
-                st.markdown(query)
-
-            client = genai.Client(api_key=api_key)
-            with st.chat_message("assistant"):
-                with st.spinner(f"Consulting {ASSISTANT_NAME}..."):
+                client = genai.Client(api_key=api_key)
+                with st.spinner("Executing rigorous mathematical and methodological deep-dive..."):
                     try:
-                        reply = answer_interrogation_query(
-                            client, query, data, st.session_state.get("raw_paper_text", ""), st.session_state["chat_history"]
-                        )
-                        st.markdown(reply)
-                        st.session_state["chat_history"].append({"role": "assistant", "content": reply})
+                        deep_dive_res = generate_forensic_deep_dive(client, data, st.session_state.get("raw_paper_text", ""))
+                        st.session_state["deep_dive_data"] = deep_dive_res
+                        st.success("Publication-grade forensic deep-dive generated.")
+                        st.rerun()
                     except Exception as err:
-                        st.error(f"Query error: {err}")
+                        st.error(f"Error generating deep-dive: {err}")
+
+        if st.session_state.get("deep_dive_data"):
+            dd = st.session_state["deep_dive_data"]
+            with st.container():
+                st.markdown("#### ⚖️ Methodological Tool Selection Rationale & Rejection Rules")
+                rat = dd.get("tool_selection_rationale", {})
+                st.markdown(f"**Mandated Instrument:** `{rat.get('assigned_tool', 'N/A')}`")
+                st.write(rat.get("selection_justification", "N/A"))
+                with st.expander("Comparative Framework Analysis & Rejection Decision Algorithm"):
+                    st.write(rat.get("competing_tools_rejected", "N/A"))
+
+                st.markdown("#### 🧮 Individual Score Interpretations & Arithmetic Derivations")
+                scoring_system = dd.get("scoring_system_breakdown", {})
+                st.write(f"**Meaning of Score Levels:**\n{scoring_system.get('individual_score_meanings', 'N/A')}")
+                st.write(f"**Aggregation Logic:**\n{scoring_system.get('how_scores_are_awarded', 'N/A')}")
+                st.write(f"**Quality Thresholds:**\n{scoring_system.get('quality_thresholds', 'N/A')}")
+
+                arith = dd.get("arithmetic_breakdown", {})
+                st.info(f"**Mathematical Rule / Equation:** {arith.get('formula_used', 'N/A')}\n\n**Step-by-Step Calculation:**\n{arith.get('step_by_step_calculation', 'N/A')}\n\n**Final Result:** {arith.get('final_tally', 'N/A')}")
+
+                st.markdown("#### ⚠️ Substantive Content Criticisms")
+                for c in dd.get("substantive_criticisms", []):
+                    st.error(f"**{c.get('flaw_title')}:** {c.get('manuscript_evidence')}\n\n*Epidemiological Threat:* {c.get('epidemiological_impact')}")
+
+                adv = dd.get("translational_verdict_and_advisory", "")
+                if adv:
+                    st.markdown("#### 🎯 Translational Clinical Advisory")
+                    st.success(f"**Clinical Practice Recommendation:** {adv}")
+
+                c_dd_doc, c_dd_pdf = st.columns(2)
+                with c_dd_doc:
+                    st.download_button(
+                        "📥 Download Forensic Deep-Dive (.docx)",
+                        data=build_deep_dive_docx_report(data, dd),
+                        file_name=format_harvard_filename(data, "docx", tag="Forensic_Audit"),
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                    )
+                with c_dd_pdf:
+                    st.download_button(
+                        "📥 Download Forensic Deep-Dive (.pdf)",
+                        data=build_deep_dive_pdf_report(data, dd),
+                        file_name=format_harvard_filename(data, "pdf", tag="Forensic_Audit"),
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+
+        st.markdown("---")
+        st.subheader(f"💬 {ASSISTANT_NAME}")
+        for msg in st.session_state["chat_history"]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        if query := st.chat_input("Ask about specific scores, point rules, or line citations..."):
+            if not api_key:
+                st.error("Key required.")
+            else:
+                st.session_state["chat_history"].append({"role": "user", "content": query})
+                with st.chat_message("user"):
+                    st.markdown(query)
+
+                client = genai.Client(api_key=api_key)
+                with st.chat_message("assistant"):
+                    with st.spinner(f"Consulting {ASSISTANT_NAME}..."):
+                        try:
+                            reply = answer_interrogation_query(
+                                client, query, data, st.session_state.get("raw_paper_text", ""), st.session_state["chat_history"]
+                            )
+                            st.markdown(reply)
+                            st.session_state["chat_history"].append({"role": "assistant", "content": reply})
+                        except Exception as err:
+                            st.error(f"Query error: {err}") any good?
