@@ -24,6 +24,14 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 import requests
 import streamlit as st
 
+# Optional PostgreSQL driver import (psycopg2-binary)
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    POSTGRES_DRIVER_AVAILABLE = True
+except ImportError:
+    POSTGRES_DRIVER_AVAILABLE = False
+
 # Optional OCR fallback imports
 try:
     from pdf2image import convert_from_bytes
@@ -37,7 +45,6 @@ APP_NAME = "Kitique Appraisal Tool"
 ASSISTANT_NAME = "Ki's Assistant"
 MIN_CONFIDENCE_MARGIN = 15
 
-# Default fast & free Gemini API models
 FREE_ACTIVE_MODELS = [
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
@@ -49,11 +56,6 @@ FREE_ACTIVE_MODELS = [
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_active_models(api_key_str: str) -> List[str]:
-    """
-    Dynamically queries the Gemini API for active models that support generateContent on this API key.
-    Uses api_key_str as a hashable string so Streamlit caching works without failing on Client objects.
-    Eliminates 404 NOT_FOUND model errors permanently.
-    """
     if not api_key_str:
         return FREE_ACTIVE_MODELS
     try:
@@ -89,7 +91,32 @@ class ClassificationConsistencyError(Exception):
     pass
 
 
+# ==========================================
+# 0. CLOUD POSTGRESQL (NEON / SUPABASE) + SQLITE DUAL ENGINE
+# ==========================================
+def get_database_url() -> Optional[str]:
+    """Retrieves DATABASE_URL from Streamlit secrets or environment variables."""
+    try:
+        url = st.secrets.get("DATABASE_URL", None)
+        if url:
+            return str(url).strip()
+        if "connections" in st.secrets and "neon" in st.secrets["connections"]:
+            return str(st.secrets["connections"]["neon"].get("url", "")).strip()
+    except Exception:
+        pass
+    return os.environ.get("DATABASE_URL", None)
+
+
+def is_cloud_postgres_active() -> bool:
+    db_url = get_database_url()
+    return bool(db_url and POSTGRES_DRIVER_AVAILABLE and db_url.startswith(("postgres://", "postgresql://")))
+
+
 def get_connection():
+    """Returns a PostgreSQL connection (if DATABASE_URL is set) or local SQLite connection."""
+    if is_cloud_postgres_active():
+        db_url = get_database_url()
+        return psycopg2.connect(db_url, cursor_factory=RealDictCursor, connect_timeout=10)
     conn = sqlite3.connect(DB_NAME, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
@@ -446,101 +473,193 @@ SEED_TAXONOMY = {
 
 
 def init_db():
-    with get_connection() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS appraisals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                paper_title TEXT NOT NULL,
-                study_design TEXT,
-                tool_selected TEXT,
-                overall_verdict TEXT,
-                source_name TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                full_json TEXT NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS custom_tools (
-                design_name TEXT PRIMARY KEY,
-                tool_data TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        cursor = conn.cursor()
-        cursor.execute("SELECT count(*) as cnt FROM custom_tools")
-        if cursor.fetchone()["cnt"] == 0:
-            for design_name, tool_obj in SEED_TAXONOMY.items():
-                cursor.execute(
-                    "INSERT OR IGNORE INTO custom_tools (design_name, tool_data) VALUES (?, ?)",
-                    (design_name, json.dumps(tool_obj)),
+    """Initializes tables in either Cloud PostgreSQL (Neon/Supabase) or local SQLite."""
+    use_pg = is_cloud_postgres_active()
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        if use_pg:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS appraisals (
+                    id SERIAL PRIMARY KEY,
+                    paper_title TEXT NOT NULL,
+                    study_design TEXT,
+                    tool_selected TEXT,
+                    overall_verdict TEXT,
+                    source_name TEXT,
+                    created_at TEXT,
+                    full_json TEXT NOT NULL
                 )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS custom_tools (
+                    design_name TEXT PRIMARY KEY,
+                    tool_data TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("SELECT count(*) as cnt FROM custom_tools")
+            row = cur.fetchone()
+            cnt = row["cnt"] if isinstance(row, dict) else row[0]
+            if cnt == 0:
+                for design_name, tool_obj in SEED_TAXONOMY.items():
+                    cur.execute(
+                        """
+                        INSERT INTO custom_tools (design_name, tool_data)
+                        VALUES (%s, %s)
+                        ON CONFLICT (design_name) DO NOTHING
+                        """,
+                        (design_name, json.dumps(tool_obj)),
+                    )
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS appraisals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    paper_title TEXT NOT NULL,
+                    study_design TEXT,
+                    tool_selected TEXT,
+                    overall_verdict TEXT,
+                    source_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    full_json TEXT NOT NULL
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS custom_tools (
+                    design_name TEXT PRIMARY KEY,
+                    tool_data TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("SELECT count(*) as cnt FROM custom_tools")
+            if cur.fetchone()["cnt"] == 0:
+                for design_name, tool_obj in SEED_TAXONOMY.items():
+                    cur.execute(
+                        "INSERT OR IGNORE INTO custom_tools (design_name, tool_data) VALUES (?, ?)",
+                        (design_name, json.dumps(tool_obj)),
+                    )
         conn.commit()
+    finally:
+        conn.close()
 
 
 def get_all_tools() -> Dict[str, dict]:
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT design_name, tool_data FROM custom_tools ORDER BY rowid ASC")
-        return {row["design_name"]: json.loads(row["tool_data"]) for row in cursor.fetchall()}
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT design_name, tool_data FROM custom_tools ORDER BY created_at ASC")
+        rows = cur.fetchall()
+        return {row["design_name"]: json.loads(row["tool_data"]) for row in rows}
+    finally:
+        conn.close()
 
 
 def save_discovered_tool(design_name: str, tool_obj: dict):
-    with get_connection() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO custom_tools (design_name, tool_data) VALUES (?, ?)",
-            (design_name, json.dumps(tool_obj)),
-        )
+    use_pg = is_cloud_postgres_active()
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        if use_pg:
+            cur.execute(
+                """
+                INSERT INTO custom_tools (design_name, tool_data)
+                VALUES (%s, %s)
+                ON CONFLICT (design_name) DO UPDATE SET tool_data = EXCLUDED.tool_data
+                """,
+                (design_name, json.dumps(tool_obj)),
+            )
+        else:
+            cur.execute(
+                "INSERT OR REPLACE INTO custom_tools (design_name, tool_data) VALUES (?, ?)",
+                (design_name, json.dumps(tool_obj)),
+            )
         conn.commit()
+    finally:
+        conn.close()
 
 
 def save_appraisal(data: dict, source_name: str) -> int:
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO appraisals (
-                paper_title, study_design, tool_selected, 
-                overall_verdict, source_name, created_at, full_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                data.get("paper_title", "Untitled Manuscript"),
-                data.get("study_design", "Unknown"),
-                data.get("appraisal_tool_selected", "Unknown"),
-                data.get("overall_verdict", "Unknown"),
-                source_name,
-                datetime.now().strftime("%Y-%m-%d %H:%M"),
-                json.dumps(data),
-            ),
+    use_pg = is_cloud_postgres_active()
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        params = (
+            data.get("paper_title", "Untitled Manuscript"),
+            data.get("study_design", "Unknown"),
+            data.get("appraisal_tool_selected", "Unknown"),
+            data.get("overall_verdict", "Unknown"),
+            source_name,
+            datetime.now().strftime("%Y-%m-%d %H:%M"),
+            json.dumps(data),
         )
+        if use_pg:
+            cur.execute(
+                """
+                INSERT INTO appraisals (
+                    paper_title, study_design, tool_selected,
+                    overall_verdict, source_name, created_at, full_json
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                params,
+            )
+            row = cur.fetchone()
+            new_id = row["id"] if isinstance(row, dict) else row[0]
+        else:
+            cur.execute(
+                """
+                INSERT INTO appraisals (
+                    paper_title, study_design, tool_selected,
+                    overall_verdict, source_name, created_at, full_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                params,
+            )
+            new_id = cur.lastrowid
         conn.commit()
-        return cursor.lastrowid
+        return int(new_id)
+    finally:
+        conn.close()
 
 
 def get_all_appraisals() -> List[Dict]:
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, paper_title, study_design, tool_selected, 
-                   overall_verdict, source_name, created_at 
-            FROM appraisals 
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, paper_title, study_design, tool_selected,
+                   overall_verdict, source_name, created_at
+            FROM appraisals
             ORDER BY id DESC
         """)
-        return [dict(row) for row in cursor.fetchall()]
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
 
 
 def get_appraisal_by_id(appraisal_id: int) -> Optional[dict]:
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT full_json FROM appraisals WHERE id = ?", (appraisal_id,))
-        row = cursor.fetchone()
+    use_pg = is_cloud_postgres_active()
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        placeholder = "%s" if use_pg else "?"
+        cur.execute(f"SELECT full_json FROM appraisals WHERE id = {placeholder}", (appraisal_id,))
+        row = cur.fetchone()
         return json.loads(row["full_json"]) if row else None
+    finally:
+        conn.close()
 
 
 def delete_appraisal(appraisal_id: int):
-    with get_connection() as conn:
-        conn.execute("DELETE FROM appraisals WHERE id = ?", (appraisal_id,))
+    use_pg = is_cloud_postgres_active()
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        placeholder = "%s" if use_pg else "?"
+        cur.execute(f"DELETE FROM appraisals WHERE id = {placeholder}", (appraisal_id,))
         conn.commit()
+    finally:
+        conn.close()
 
 
 # ==========================================
@@ -764,7 +883,6 @@ def detect_hierarchical_overrides(sections: Dict[str, str]) -> Optional[Tuple[st
     meth_l = sections["methods"].lower()
     body_head = sections["body_no_refs"][:12000].lower()
 
-    # HIERARCHY TIER 1: Clinical Practice Guideline / Consensus Statement
     has_guideline_title = bool(re.search(r"\b(?:practical\s+guideline|clinical\s+practice\s+guideline|espen\s+guideline|consensus\s+statement|consensus\s+guidelines?|practice\s+guideline)\b", title_l))
     has_graded_recommendations = bool(re.search(r"(?:grade\s+of\s+recommendation|strong\s+consensus\s*\(\d+%\s*agreement\)|recommendation\s+\d+\s*\n|sign\s+methodology|delphi\s+rounds?)", meth_l + body_head))
 
@@ -782,7 +900,6 @@ def detect_hierarchical_overrides(sections: Dict[str, str]) -> Optional[Tuple[st
         ]
         return "Clinical Practice Guideline / Consensus Statement", decision_path, excluded
 
-    # HIERARCHY TIER 2: Systematic Review / Meta-Analysis
     has_sr_title = bool(re.search(r"\b(?:systematic\s+review|meta-analysis|network\s+meta-analysis)\b", title_l))
     has_prisma_methods = bool(re.search(r"\b(?:prisma|preferred\s+reporting\s+items\s+for\s+systematic|prospero|boolean|databases?\s+were\s+searched)\b", meth_l + abs_l))
 
@@ -799,7 +916,6 @@ def detect_hierarchical_overrides(sections: Dict[str, str]) -> Optional[Tuple[st
             ]
         )
 
-    # HIERARCHY TIER 3: Randomized Controlled Trial (RCT)
     has_rct_title = bool(re.search(r"\b(?:randomi[zs]ed\s+controlled\s+trial|randomi[zs]ed\s+clinical\s+trial|double-blind.*trial|phase\s+iii\s+trial)\b", title_l))
     has_random_allocation = bool(re.search(r"\b(?:randomly\s+assigned|randomi[zs]ed\s+to\s+receive|allocation\s+concealment|computer-generated\s+random)\b", meth_l + abs_l))
 
@@ -990,7 +1106,6 @@ def validate_framework_signature_and_legality(
     warnings = []
     text_lower = manuscript_text.lower() if manuscript_text else ""
 
-    # HARD FAIL 1: Legality Matrix
     if design in LEGAL_PAIRS:
         allowed_tools = LEGAL_PAIRS[design]
         if not any(allowed.lower() in selected_tool.lower() or selected_tool.lower() in allowed.lower() for allowed in allowed_tools):
@@ -999,14 +1114,12 @@ def validate_framework_signature_and_legality(
             )
         passed_notes.append(f"Legality Matrix Verified: '{design}' <-> '{selected_tool}'")
 
-    # HARD FAIL 2: Foreign Tool Domain Cross-Contamination
     domain_names_blob = " ".join([str(d.get("domain_name", "")).lower() for d in generated_domains])
     if "AMSTAR" in selected_tool.upper() and ("stakeholder involvement" in domain_names_blob or "editorial independence" in domain_names_blob):
         raise ClassificationConsistencyError("Hard Fail — Cross-Contamination: AMSTAR 2 output contains AGREE II guideline domains.")
     if "AGREE" in selected_tool.upper() and ("duplicate study selection" in domain_names_blob or "publication bias" in domain_names_blob):
         raise ClassificationConsistencyError("Hard Fail — Cross-Contamination: AGREE II output contains AMSTAR 2 review domains.")
 
-    # HARD FAIL 3: Source-Manuscript Direct Verification
     sig = FRAMEWORK_SIGNATURES.get(design)
     if sig and text_lower:
         must_have_any = sig.get("source_must_have_any", [])
@@ -1020,7 +1133,6 @@ def validate_framework_signature_and_legality(
             if re.search(forbidden_pat, text_lower[:8000]):
                 warnings.append(f"Source Advisory: Detected phrase matching '{forbidden_pat}' in manuscript; verify architecture.")
 
-    # SOFT WARNING: Expected Domain Keyword Overlap
     if sig and generated_domains:
         expected_kws = sig.get("expected_domain_keywords", [])
         matches = sum(1 for kw in expected_kws if kw in domain_names_blob)
@@ -2262,6 +2374,11 @@ else:
         else:
             st.success("Access Credential Active")
 
+        if is_cloud_postgres_active():
+            st.caption("☁️ Storage: `Cloud PostgreSQL (Persistent)`")
+        else:
+            st.caption("💾 Storage: `Local SQLite (Ephemeral on Cloud)`")
+
         if api_key:
             active_m = get_active_models(api_key)
             st.caption(f"⚡ Active Models: `{', '.join(active_m[:3])}`")
@@ -2284,7 +2401,7 @@ else:
         else:
             for r in records[:st.session_state["history_limit"]]:
                 short_title = r["paper_title"][:34] + "..." if len(r["paper_title"]) > 34 else r["paper_title"]
-                st.markdown(f"**{short_title}**\n<small>{r['created_at'][:10]} · {r['tool_selected']}</small>", unsafe_allow_html=True)
+                st.markdown(f"**{short_title}**\n<small>{str(r['created_at'])[:10]} · {r['tool_selected']}</small>", unsafe_allow_html=True)
                 c_load, c_del = st.columns([3, 1])
                 with c_load:
                     if st.button("Load", key=f"v_{r['id']}", use_container_width=True):
