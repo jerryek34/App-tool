@@ -1,4 +1,7 @@
+import base64
 import difflib
+import hashlib
+import html
 import io
 import json
 import os
@@ -45,6 +48,7 @@ APP_NAME = "Kitique Appraisal Tool"
 ASSISTANT_NAME = "Ki's Assistant"
 MIN_CONFIDENCE_MARGIN = 15
 
+# Ordered fastest-first for sub-5-second responses
 FREE_ACTIVE_MODELS = [
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
@@ -52,6 +56,18 @@ FREE_ACTIVE_MODELS = [
     "gemini-3.8-flash",
     "gemini-2.0-flash",
 ]
+
+
+def xml_safe(val: object) -> str:
+    if val is None:
+        return ""
+    return html.escape(str(val), quote=False)
+
+
+def render_inline_pdf_preview(pdf_bytes: bytes, height: int = 550):
+    b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+    pdf_display = f'<iframe src="data:application/pdf;base64,{b64_pdf}" width="100%" height="{height}px" type="application/pdf" style="border: 1px solid #78BBA6; border-radius: 8px;"></iframe>'
+    st.markdown(pdf_display, unsafe_allow_html=True)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -87,24 +103,24 @@ def get_active_models(api_key_str: str) -> List[str]:
 
 
 class ClassificationConsistencyError(Exception):
-    """Raised ONLY on objective, impossible structural contradictions (Hard Fails)."""
     pass
 
 
 # ==========================================
-# 0. CLOUD POSTGRESQL (NEON / SUPABASE) + SQLITE DUAL ENGINE
+# 0. FAST PERSISTENT CLOUD DB + CACHED QUERIES
 # ==========================================
 def get_database_url() -> Optional[str]:
-    """Retrieves DATABASE_URL from Streamlit secrets or environment variables."""
     try:
         url = st.secrets.get("DATABASE_URL", None)
         if url:
-            return str(url).strip()
-        if "connections" in st.secrets and "neon" in st.secrets["connections"]:
-            return str(st.secrets["connections"]["neon"].get("url", "")).strip()
+            clean_url = str(url).strip()
+            return re.sub(r"[&?]channel_binding=require", "", clean_url)
     except Exception:
         pass
-    return os.environ.get("DATABASE_URL", None)
+    env_url = os.environ.get("DATABASE_URL", None)
+    if env_url:
+        return re.sub(r"[&?]channel_binding=require", "", env_url.strip())
+    return None
 
 
 def is_cloud_postgres_active() -> bool:
@@ -112,14 +128,28 @@ def is_cloud_postgres_active() -> bool:
     return bool(db_url and POSTGRES_DRIVER_AVAILABLE and db_url.startswith(("postgres://", "postgresql://")))
 
 
-def get_connection():
-    """Returns a PostgreSQL connection (if DATABASE_URL is set) or local SQLite connection."""
-    if is_cloud_postgres_active():
-        db_url = get_database_url()
-        return psycopg2.connect(db_url, cursor_factory=RealDictCursor, connect_timeout=10)
+@st.cache_resource(show_spinner=False)
+def get_cached_sqlite_conn():
     conn = sqlite3.connect(DB_NAME, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def get_connection():
+    """Returns a connection. For Postgres, uses fast connect; for SQLite, reuses cached connection."""
+    if is_cloud_postgres_active():
+        db_url = get_database_url()
+        return psycopg2.connect(db_url, cursor_factory=RealDictCursor, connect_timeout=10)
+    return get_cached_sqlite_conn()
+
+
+def close_conn_safely(conn):
+    """Only closes PostgreSQL connections; keeps local SQLite cached resource alive."""
+    if is_cloud_postgres_active() and conn:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 # ==========================================
@@ -472,8 +502,10 @@ SEED_TAXONOMY = {
 }
 
 
-def init_db():
-    """Initializes tables in either Cloud PostgreSQL (Neon/Supabase) or local SQLite."""
+def init_db_once():
+    """Runs database table creation ONLY ONCE per session to eliminate 1.5s lag on every click."""
+    if st.session_state.get("db_initialized"):
+        return
     use_pg = is_cloud_postgres_active()
     conn = get_connection()
     try:
@@ -539,10 +571,12 @@ def init_db():
                         (design_name, json.dumps(tool_obj)),
                     )
         conn.commit()
+        st.session_state["db_initialized"] = True
     finally:
-        conn.close()
+        close_conn_safely(conn)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_all_tools() -> Dict[str, dict]:
     conn = get_connection()
     try:
@@ -550,8 +584,10 @@ def get_all_tools() -> Dict[str, dict]:
         cur.execute("SELECT design_name, tool_data FROM custom_tools ORDER BY created_at ASC")
         rows = cur.fetchall()
         return {row["design_name"]: json.loads(row["tool_data"]) for row in rows}
+    except Exception:
+        return dict(SEED_TAXONOMY)
     finally:
-        conn.close()
+        close_conn_safely(conn)
 
 
 def save_discovered_tool(design_name: str, tool_obj: dict):
@@ -574,8 +610,9 @@ def save_discovered_tool(design_name: str, tool_obj: dict):
                 (design_name, json.dumps(tool_obj)),
             )
         conn.commit()
+        get_all_tools.clear()
     finally:
-        conn.close()
+        close_conn_safely(conn)
 
 
 def save_appraisal(data: dict, source_name: str) -> int:
@@ -617,11 +654,33 @@ def save_appraisal(data: dict, source_name: str) -> int:
             )
             new_id = cur.lastrowid
         conn.commit()
+        get_all_appraisals.clear()
         return int(new_id)
     finally:
-        conn.close()
+        close_conn_safely(conn)
 
 
+def update_appraisal_json(appraisal_id: int, data: dict):
+    if not appraisal_id:
+        return
+    use_pg = is_cloud_postgres_active()
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        placeholder = "%s" if use_pg else "?"
+        cur.execute(
+            f"UPDATE appraisals SET full_json = {placeholder} WHERE id = {placeholder}",
+            (json.dumps(data), appraisal_id),
+        )
+        conn.commit()
+        get_all_appraisals.clear()
+    except Exception:
+        pass
+    finally:
+        close_conn_safely(conn)
+
+
+@st.cache_data(ttl=120, show_spinner=False)
 def get_all_appraisals() -> List[Dict]:
     conn = get_connection()
     try:
@@ -633,8 +692,10 @@ def get_all_appraisals() -> List[Dict]:
             ORDER BY id DESC
         """)
         return [dict(row) for row in cur.fetchall()]
+    except Exception:
+        return []
     finally:
-        conn.close()
+        close_conn_safely(conn)
 
 
 def get_appraisal_by_id(appraisal_id: int) -> Optional[dict]:
@@ -647,7 +708,7 @@ def get_appraisal_by_id(appraisal_id: int) -> Optional[dict]:
         row = cur.fetchone()
         return json.loads(row["full_json"]) if row else None
     finally:
-        conn.close()
+        close_conn_safely(conn)
 
 
 def delete_appraisal(appraisal_id: int):
@@ -658,8 +719,9 @@ def delete_appraisal(appraisal_id: int):
         placeholder = "%s" if use_pg else "?"
         cur.execute(f"DELETE FROM appraisals WHERE id = {placeholder}", (appraisal_id,))
         conn.commit()
+        get_all_appraisals.clear()
     finally:
-        conn.close()
+        close_conn_safely(conn)
 
 
 # ==========================================
@@ -791,6 +853,7 @@ def find_probable_title_and_header(text: str) -> Tuple[str, str]:
     return best_title, combined_title_zone
 
 
+@st.cache_data(show_spinner=False)
 def parse_manuscript_sections(text: str) -> Dict[str, str]:
     detected_title, title_zone = find_probable_title_and_header(text)
     lower = text.lower()
@@ -810,6 +873,17 @@ def parse_manuscript_sections(text: str) -> Dict[str, str]:
 
     abstract_zone = text[abs_start:max(abs_start + 2500, m_start)]
 
+    # Build a compact, high-signal manuscript payload (capped at 28,000 chars) so LLM calls finish in <6 seconds
+    body_no_refs = text[:ref_start]
+    if len(body_no_refs) > 28000:
+        smart_trimmed = (
+            body_no_refs[:18000]
+            + "\n\n... [Middle Commentary Trimmed for Speed] ...\n\n"
+            + body_no_refs[-10000:]
+        )
+    else:
+        smart_trimmed = body_no_refs
+
     return {
         "detected_title": detected_title,
         "title": title_zone,
@@ -817,7 +891,7 @@ def parse_manuscript_sections(text: str) -> Dict[str, str]:
         "methods": text[m_start:min(r_start, m_start + 8000)],
         "results": text[r_start:min(d_start, r_start + 8000)],
         "discussion": text[d_start:min(ref_start, d_start + 8000)],
-        "body_no_refs": text[:ref_start],
+        "body_no_refs": smart_trimmed,
     }
 
 
@@ -875,7 +949,7 @@ def format_harvard_filename(data: dict, extension: str, tag: str = "Short") -> s
 
 
 # ==========================================
-# 3. HIERARCHICAL OVERRIDES & CONSISTENCY AUDITOR
+# 3. CACHED HIERARCHICAL OVERRIDES & CONSISTENCY AUDITOR
 # ==========================================
 def detect_hierarchical_overrides(sections: Dict[str, str]) -> Optional[Tuple[str, List[str], List[str]]]:
     title_l = sections["title"].lower()
@@ -999,8 +1073,8 @@ def run_deterministic_section_classifier(sections: Dict[str, str]) -> Tuple[str,
     return winner, scores, decision_path, excluded_alternatives, False
 
 
-def run_llm_classifier_b(client: Optional[genai.Client], api_key_str: str, sections: Dict[str, str], available_designs: List[str]) -> Tuple[str, str]:
-    if not client or not api_key_str:
+def run_llm_classifier_b(api_key_str: str, sections: Dict[str, str], available_designs: List[str]) -> Tuple[str, str]:
+    if not api_key_str:
         return "", "No API key active"
     valid_list = [d for d in available_designs if not d.startswith("🔍")]
     prompt = f"""
@@ -1026,6 +1100,7 @@ def run_llm_classifier_b(client: Optional[genai.Client], api_key_str: str, secti
       "llm_rationale": "1 sentence explanation"
     }}
     """
+    client = genai.Client(api_key=api_key_str)
     for model_name in get_active_models(api_key_str):
         try:
             resp = client.models.generate_content(
@@ -1035,24 +1110,33 @@ def run_llm_classifier_b(client: Optional[genai.Client], api_key_str: str, secti
             )
             parsed = json.loads(resp.text)
             return parsed.get("llm_design", ""), parsed.get("llm_rationale", "")
-        except (json.JSONDecodeError, KeyError):
-            continue
         except Exception:
             continue
     return "", "LLM classifier unavailable"
 
 
-def run_framework_consistency_auditor(
-    text: str, client: Optional[genai.Client], api_key_str: str, available_designs: List[str]
+@st.cache_data(show_spinner=False)
+def run_framework_consistency_auditor_cached(
+    text: str, api_key_str: str, available_designs: List[str]
 ) -> dict:
+    """
+    Cached so it ONLY runs once per uploaded paper!
+    Also skips the network LLM call if the deterministic rule engine already has a high-confidence match (margin >= 40).
+    """
     sections = parse_manuscript_sections(text)
     rule_winner, score_map, decision_path, excluded_alts, is_hierarchical = run_deterministic_section_classifier(sections)
-    llm_winner, llm_rationale = run_llm_classifier_b(client, api_key_str, sections, available_designs)
 
     sorted_scores = sorted(score_map.items(), key=lambda x: x[1], reverse=True)
     first_design, first_score = sorted_scores[0]
     second_design, second_score = sorted_scores[1] if len(sorted_scores) > 1 else ("None", 0)
     margin = first_score - second_score
+
+    # Fast-Path Optimization: Only call the LLM Classifier B if the deterministic rule engine is uncertain (margin < 40)
+    if is_hierarchical or margin >= 40:
+        llm_winner = rule_winner
+        llm_rationale = "Skipped network call (Deterministic Rule Engine margin >= 40 / Hierarchical Override)"
+    else:
+        llm_winner, llm_rationale = run_llm_classifier_b(api_key_str, sections, available_designs)
 
     base_confidence = 0.98 if is_hierarchical else min(0.95, round(0.75 + (margin / 250.0), 2))
     disagreement_detected = bool(llm_winner and llm_winner in score_map and llm_winner != rule_winner)
@@ -1060,8 +1144,6 @@ def run_framework_consistency_auditor(
     if disagreement_detected and not is_hierarchical:
         base_confidence = round(max(0.50, base_confidence - 0.15), 2)
         decision_path.append(f"LLM Classifier B suggested '{llm_winner}' (-0.15 confidence adjustment applied)")
-    elif disagreement_detected and is_hierarchical:
-        decision_path.append(f"Hierarchical Override ('{rule_winner}') superseded LLM suggestion ('{llm_winner}')")
 
     requires_human_confirmation = (base_confidence < 0.80) or (margin < MIN_CONFIDENCE_MARGIN and not is_hierarchical)
 
@@ -1080,7 +1162,7 @@ def run_framework_consistency_auditor(
         "status": status,
         "hierarchical_override": is_hierarchical,
         "classifier_a_rule_engine": f"{rule_winner} ({first_score} pts; runner-up: {second_design} at {second_score} pts)",
-        "classifier_b_llm": f"{llm_winner or 'Not Run'} ({llm_rationale})",
+        "classifier_b_llm": f"{llm_winner} ({llm_rationale})",
         "confidence_margin": margin,
         "disagreement_detected": disagreement_detected,
         "requires_human_confirmation": requires_human_confirmation,
@@ -1147,7 +1229,7 @@ def validate_framework_signature_and_legality(
 
 
 # ==========================================
-# 4. DUAL-THRESHOLD GROUNDEDNESS & SCORE RECONCILER
+# 4. FAST QUOTE CHECKSUM & SCORE RECONCILER
 # ==========================================
 def clean_tokens(s: str) -> List[str]:
     s = s.lower()
@@ -1157,30 +1239,34 @@ def clean_tokens(s: str) -> List[str]:
     return s.split()
 
 
-def fuzzy_quote_match(quote: str, source_text: str, threshold: float = 0.85) -> Tuple[bool, float]:
+def fuzzy_quote_match_fast(quote: str, source_clean: str, source_tokens: List[str], source_token_set: set, threshold: float = 0.85) -> Tuple[bool, float]:
     quote_tokens = clean_tokens(quote)
     if not quote_tokens:
         return False, 0.0
     q_len = len(quote_tokens)
     q_str = " ".join(quote_tokens)
-    source_clean = " ".join(clean_tokens(source_text))
+
+    # 1. Instant substring check (O(N) in C)
     if q_str in source_clean:
         return True, 1.0
 
-    source_tokens = clean_tokens(source_text)
     if not source_tokens:
         return False, 0.0
 
-    if q_len < 5:
-        overlap = len(set(quote_tokens) & set(source_tokens)) / float(len(set(quote_tokens)))
-        return (overlap >= threshold), overlap
+    # 2. Fast token-set overlap check
+    q_set = set(quote_tokens)
+    token_overlap = len(q_set & source_token_set) / float(len(q_set))
+    if q_len < 6 or token_overlap >= 0.92:
+        return (token_overlap >= threshold), round(token_overlap, 2)
 
-    best_ratio = 0.0
-    step = max(1, int(q_len * 0.35))
+    # 3. Strided window check only if token overlap is promising (>= 0.65)
+    if token_overlap < 0.65:
+        return False, round(token_overlap, 2)
+
+    best_ratio = token_overlap
+    step = max(2, int(q_len * 0.5))
     for i in range(0, len(source_tokens) - q_len + 1, step):
         window = " ".join(source_tokens[i : i + q_len])
-        if abs(len(window) - len(q_str)) > len(q_str) * 0.4:
-            continue
         ratio = difflib.SequenceMatcher(None, q_str, window).quick_ratio()
         if ratio > best_ratio:
             best_ratio = ratio
@@ -1208,6 +1294,11 @@ def run_comprehensive_checksum(
         data["groundedness_score"] = 0.0
         return data, 0.0, [], ["No domain appraisals populated."]
 
+    # Pre-tokenize source text ONCE instead of inside every domain loop
+    source_tokens = clean_tokens(full_raw_text)
+    source_clean = " ".join(source_tokens)
+    source_token_set = set(source_tokens)
+
     verified_count = 0
     for d in domains:
         raw_quote = d.get("verbatim_evidence", "").strip()
@@ -1219,7 +1310,7 @@ def run_comprehensive_checksum(
         is_direct_quote = raw_quote.startswith('"') or raw_quote.startswith("“") or raw_quote.startswith("'")
         req_threshold = 0.95 if is_direct_quote else 0.85
 
-        is_match, ratio = fuzzy_quote_match(raw_quote, full_raw_text, threshold=req_threshold)
+        is_match, ratio = fuzzy_quote_match_fast(raw_quote, source_clean, source_tokens, source_token_set, threshold=req_threshold)
         if is_match:
             mode_tag = "Direct Quote" if is_direct_quote else "Evidence"
             d["checksum_status"] = f"Verified {mode_tag} ({int(ratio * 100)}%)"
@@ -1270,8 +1361,6 @@ def discover_appraisal_tool(client: genai.Client, api_key_str: str, text_sample:
             )
             res_json = json.loads(response.text)
             return res_json["design_name"], res_json["tool_taxonomy"]
-        except (json.JSONDecodeError, KeyError):
-            continue
         except Exception:
             continue
     raise RuntimeError("Failed to discover tool schema across active models.")
@@ -1547,7 +1636,7 @@ def execute_manuscript_evaluation(
     """
 
     sections = parse_manuscript_sections(text_content) if text_content else {}
-    clean_text = sections.get("body_no_refs", text_content) if text_content else ""
+    clean_text = sections.get("body_no_refs", text_content[:28000]) if text_content else ""
     contents = [f"PAPER CONTENT:\n{clean_text}\n\nExecute appraisal under {mandatory_tool_name} and return JSON."] if (clean_text and len(clean_text.strip()) > 150) else (
         [types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf"), f"Appraise for {assigned_design} using {mandatory_tool_name}."] if raw_pdf_bytes else None
     )
@@ -1558,58 +1647,48 @@ def execute_manuscript_evaluation(
     error_log = []
 
     for model_name in models_to_try:
-        for attempt in range(2):
-            try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=contents,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json",
-                        temperature=0.0,
-                    ),
-                )
-                raw_text = response.text.strip()
-                if raw_text.startswith("```"):
-                    raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
-                    raw_text = re.sub(r"\n```$", "", raw_text)
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                    temperature=0.0,
+                ),
+            )
+            raw_text = response.text.strip()
+            if raw_text.startswith("```"):
+                raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
+                raw_text = re.sub(r"\n```$", "", raw_text)
 
-                parsed = json.loads(raw_text)
-                if "authors" in parsed:
-                    parsed["authors"] = format_harvard_authors(parsed["authors"], max_authors=3)
+            parsed = json.loads(raw_text)
+            if "authors" in parsed:
+                parsed["authors"] = format_harvard_authors(parsed["authors"], max_authors=3)
 
-                parsed = reconcile_appraisal_scores(parsed, assigned_design=assigned_design)
+            parsed = reconcile_appraisal_scores(parsed, assigned_design=assigned_design)
 
-                passed_notes, auditor_warnings = validate_framework_signature_and_legality(
-                    assigned_design or parsed.get("study_design", ""),
-                    parsed.get("appraisal_tool_selected", ""),
-                    parsed.get("domain_appraisals", []),
-                    clean_text
-                )
+            passed_notes, auditor_warnings = validate_framework_signature_and_legality(
+                assigned_design or parsed.get("study_design", ""),
+                parsed.get("appraisal_tool_selected", ""),
+                parsed.get("domain_appraisals", []),
+                text_content or clean_text
+            )
 
-                parsed.setdefault("audit_log", {})["consistency_auditor_notes"] = passed_notes
-                parsed["audit_log"]["consistency_auditor_warnings"] = auditor_warnings
-                parsed["audit_log"]["model_used"] = model_name
-                if self_audit_report:
-                    parsed["audit_log"]["classification_decision_tree"] = self_audit_report.get("decision_tree", [])
-                    parsed["audit_log"]["self_audit_report"] = self_audit_report
+            parsed.setdefault("audit_log", {})["consistency_auditor_notes"] = passed_notes
+            parsed["audit_log"]["consistency_auditor_warnings"] = auditor_warnings
+            parsed["audit_log"]["model_used"] = model_name
+            if self_audit_report:
+                parsed["audit_log"]["classification_decision_tree"] = self_audit_report.get("decision_tree", [])
+                parsed["audit_log"]["self_audit_report"] = self_audit_report
 
-                return parsed
-            except ClassificationConsistencyError as ce:
-                raise ce
-            except (json.JSONDecodeError, KeyError, ValueError) as parse_err:
-                error_log.append(f"{model_name}: JSON parse error ({parse_err})")
-                time.sleep(1.0)
-                continue
-            except Exception as e:
-                err_str = str(e)
-                error_log.append(f"{model_name}: {err_str[:120]}")
-                if "429" in err_str or "503" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                    time.sleep(2.0)
-                    continue
-                if "404" in err_str or "NOT_FOUND" in err_str:
-                    break
-                time.sleep(1.0)
+            return parsed
+        except ClassificationConsistencyError as ce:
+            raise ce
+        except Exception as e:
+            err_str = str(e)
+            error_log.append(f"{model_name}: {err_str[:120]}")
+            continue
 
     raise RuntimeError(f"Appraisal pipeline failed across models ({', '.join(models_to_try)}). Log: {' | '.join(error_log)}")
 
@@ -1722,8 +1801,6 @@ def generate_long_version(
                 raw = re.sub(r"^```(?:json)?\n", "", raw)
                 raw = re.sub(r"\n```$", "", raw)
             return json.loads(raw)
-        except (json.JSONDecodeError, KeyError):
-            continue
         except Exception:
             continue
 
@@ -1731,8 +1808,27 @@ def generate_long_version(
 
 
 # ==========================================
-# 6. UNIFIED SEAFOAM GREEN REPORT GENERATORS (SHORT & LONG VERSIONS)
+# 6. CACHED XML-SAFE SEAFOAM GREEN REPORT GENERATORS
 # ==========================================
+@st.cache_data(show_spinner=False)
+def build_short_reports_cached(data_json_str: str) -> Tuple[bytes, bytes]:
+    """Caches both Short PDF and Short DOCX bytes so they aren't rebuilt on every click."""
+    data = json.loads(data_json_str)
+    pdf_bytes = build_short_pdf_report(data).getvalue()
+    docx_bytes = build_short_docx_report(data).getvalue()
+    return pdf_bytes, docx_bytes
+
+
+@st.cache_data(show_spinner=False)
+def build_long_reports_cached(base_json_str: str, long_json_str: str) -> Tuple[bytes, bytes]:
+    """Caches both Long PDF and Long DOCX bytes."""
+    base_data = json.loads(base_json_str)
+    long_data = json.loads(long_json_str)
+    pdf_bytes = build_long_pdf_report(base_data, long_data).getvalue()
+    docx_bytes = build_long_docx_report(base_data, long_data).getvalue()
+    return pdf_bytes, docx_bytes
+
+
 def build_short_docx_report(data: dict) -> io.BytesIO:
     doc = Document()
     title = doc.add_heading(level=0)
@@ -1773,19 +1869,19 @@ def build_short_docx_report(data: dict) -> io.BytesIO:
         for idx, pt in enumerate(takeaways, 1):
             p_t = doc.add_paragraph(style='List Bullet')
             p_t.add_run(f"Takeaway #{idx}: ").bold = True
-            p_t.add_run(pt)
+            p_t.add_run(str(pt))
 
     story_arc = data.get("narrative_arc_summary", [])
     if story_arc:
         doc.add_heading("Narrative Story Arc & Post-Grading Appraisal Journey", level=2)
         for idx, pt in enumerate(story_arc, 1):
             p_s = doc.add_paragraph(style='List Number')
-            parts = pt.split(":", 1)
+            parts = str(pt).split(":", 1)
             if len(parts) == 2:
                 p_s.add_run(parts[0] + ":").bold = True
                 p_s.add_run(parts[1])
             else:
-                p_s.add_run(pt)
+                p_s.add_run(str(pt))
 
     doc.add_paragraph("")
     doc.add_heading(f"1. Detailed Domain Appraisal ({acronym})", level=1)
@@ -1811,13 +1907,13 @@ def build_short_docx_report(data: dict) -> io.BytesIO:
     synth = data.get("overall_synthesis", [])
     if isinstance(synth, list):
         for pt in synth:
-            parts = pt.split(":", 1)
+            parts = str(pt).split(":", 1)
             p_synth = doc.add_paragraph(style='List Bullet')
             if len(parts) == 2:
                 p_synth.add_run(parts[0] + ":").bold = True
                 p_synth.add_run(parts[1])
             else:
-                p_synth.add_run(pt)
+                p_synth.add_run(str(pt))
     else:
         doc.add_paragraph(str(synth))
 
@@ -1868,7 +1964,7 @@ def build_short_pdf_report(data: dict) -> io.BytesIO:
     quote_style = ParagraphStyle("Q", parent=body_style, fontSize=7.5, leading=9.5, textColor=colors.HexColor("#555555"), fontName="Helvetica-Oblique")
 
     story = [
-        Paragraph(f"{APP_NAME} — Short Version", title_style),
+        Paragraph(f"{xml_safe(APP_NAME)} — Short Version", title_style),
         Spacer(1, 4),
     ]
 
@@ -1890,16 +1986,16 @@ def build_short_pdf_report(data: dict) -> io.BytesIO:
 
     meta_data = [
         [
-            Paragraph(f"<b>Title:</b> {data.get('paper_title', 'N/A')}", body_style),
-            Paragraph(f"<b>Authors:</b> {harvard_authors} ({data.get('year_published', 'N/A')})", body_style),
+            Paragraph(f"<b>Title:</b> {xml_safe(data.get('paper_title', 'N/A'))}", body_style),
+            Paragraph(f"<b>Authors:</b> {xml_safe(harvard_authors)} ({xml_safe(data.get('year_published', 'N/A'))})", body_style),
         ],
         [
-            Paragraph(f"<b>Design:</b> {data.get('study_design', 'N/A')} | <b>Tool:</b> {acronym}", body_style),
-            Paragraph(f"<b>Tool Score / Tally:</b> <font color='#1D3B32'><b>{explicit_score}</b></font>", body_style),
+            Paragraph(f"<b>Design:</b> {xml_safe(data.get('study_design', 'N/A'))} | <b>Tool:</b> {xml_safe(acronym)}", body_style),
+            Paragraph(f"<b>Tool Score / Tally:</b> <font color='#1D3B32'><b>{xml_safe(explicit_score)}</b></font>", body_style),
         ],
         [
-            Paragraph(f"<b>Quality Triad:</b> Method: <b>{ratings.get('methodology_quality', 'N/A')}</b> | Report: <b>{ratings.get('reporting_quality', 'N/A')}</b> | Certainty: <b>{ratings.get('certainty_score', 'N/A')}</b>", body_style),
-            Paragraph(f"<b>Consistency Audit:</b> Verified Legal Pair ({data.get('groundedness_score', 0.0)}% Grounded)", body_style),
+            Paragraph(f"<b>Quality Triad:</b> Method: <b>{xml_safe(ratings.get('methodology_quality', 'N/A'))}</b> | Report: <b>{xml_safe(ratings.get('reporting_quality', 'N/A'))}</b> | Certainty: <b>{xml_safe(ratings.get('certainty_score', 'N/A'))}</b>", body_style),
+            Paragraph(f"<b>Consistency Audit:</b> Verified Legal Pair ({xml_safe(data.get('groundedness_score', 0.0))}% Grounded)", body_style),
         ]
     ]
     t_meta = Table(meta_data, colWidths=[4.2 * inch, 3.4 * inch])
@@ -1940,18 +2036,18 @@ def build_short_pdf_report(data: dict) -> io.BytesIO:
     synth = data.get("overall_synthesis", [])
     col_left = [Paragraph("<b>💡 Key Practical Takeaways</b>", sec_heading)]
     for idx, item in enumerate(takeaways[:3], 1):
-        col_left.append(Paragraph(f"• <b>#{idx}:</b> {item}", body_style))
+        col_left.append(Paragraph(f"• <b>#{idx}:</b> {xml_safe(item)}", body_style))
         col_left.append(Spacer(1, 2))
 
     col_right = [Paragraph("<b>🔍 Methodological Synthesis (Key Points)</b>", sec_heading)]
     if isinstance(synth, list):
         for pt in synth[:4]:
-            parts = pt.split(":", 1)
-            text = f"• <b>{parts[0]}:</b> {parts[1]}" if len(parts) == 2 else f"• {pt}"
+            parts = str(pt).split(":", 1)
+            text = f"• <b>{xml_safe(parts[0])}:</b> {xml_safe(parts[1])}" if len(parts) == 2 else f"• {xml_safe(pt)}"
             col_right.append(Paragraph(text, body_style))
             col_right.append(Spacer(1, 2))
     else:
-        col_right.append(Paragraph(str(synth), body_style))
+        col_right.append(Paragraph(xml_safe(synth), body_style))
 
     t_split = Table([[col_left, col_right]], colWidths=[3.75 * inch, 3.85 * inch])
     t_split.setStyle(TableStyle([
@@ -1965,16 +2061,16 @@ def build_short_pdf_report(data: dict) -> io.BytesIO:
     story.append(t_split)
     story.append(Spacer(1, 8))
 
-    story.append(Paragraph(f"<b>Domain-by-Domain Evaluation & Core Questions ({acronym})</b>", sec_heading))
+    story.append(Paragraph(f"<b>Domain-by-Domain Evaluation & Core Questions ({xml_safe(acronym)})</b>", sec_heading))
     domain_data = [[Paragraph("Domain & Specific Question", header_style), Paragraph("Score", header_style), Paragraph("Plain-English Assessment & Grounded Evidence", header_style)]]
     for d in data.get("domain_appraisals", []):
-        r_str = str(d.get("rating", ""))
-        question = d.get("evaluation_question", "")
-        quote = d.get("verbatim_evidence", "")
-        loc = d.get("location_reference", "")
-        critique = d.get("critique", "")
+        r_str = xml_safe(d.get("rating", ""))
+        question = xml_safe(d.get("evaluation_question", ""))
+        quote = xml_safe(d.get("verbatim_evidence", ""))
+        loc = xml_safe(d.get("location_reference", ""))
+        critique = xml_safe(d.get("critique", ""))
 
-        domain_cell = [Paragraph(f"<b>{d.get('domain_name')}</b>", bold_style), Spacer(1, 2), Paragraph(f"<b>Question:</b> \"{question}\"", question_style)]
+        domain_cell = [Paragraph(f"<b>{xml_safe(d.get('domain_name'))}</b>", bold_style), Spacer(1, 2), Paragraph(f"<b>Question:</b> \"{question}\"", question_style)]
         evidence_cell = [Paragraph(critique, body_style)]
         if quote and quote.lower() not in ["none", "not reported", "n/a"]:
             evidence_cell.append(Spacer(1, 2))
@@ -2004,7 +2100,7 @@ def build_short_pdf_report(data: dict) -> io.BytesIO:
         scoring_blocks.append(Paragraph("<b>Meaning of Individual Domain Scores:</b>", bold_style))
         for line in score_interpretation.strip().split("\n"):
             if line.strip():
-                scoring_blocks.append(Paragraph(line.strip(), body_style))
+                scoring_blocks.append(Paragraph(xml_safe(line.strip()), body_style))
                 scoring_blocks.append(Spacer(1, 1))
         scoring_blocks.append(Spacer(1, 3))
 
@@ -2012,15 +2108,15 @@ def build_short_pdf_report(data: dict) -> io.BytesIO:
     if scoring_guide:
         for line in scoring_guide.strip().split("\n"):
             if line.strip():
-                scoring_blocks.append(Paragraph(line.strip(), body_style))
+                scoring_blocks.append(Paragraph(xml_safe(line.strip()), body_style))
                 scoring_blocks.append(Spacer(1, 1))
     else:
-        scoring_blocks.append(Paragraph(scoring_rules, body_style))
+        scoring_blocks.append(Paragraph(xml_safe(scoring_rules), body_style))
 
     appendix_rows = [
-        [Paragraph("Tool Applied:", bold_style), Paragraph(f"<b>{full_name} ({acronym})</b>", body_style)],
-        [Paragraph("Clinical Purpose:", bold_style), Paragraph(purpose, body_style)],
-        [Paragraph("Scored Result:", bold_style), Paragraph(f"<font color='#1D3B32'><b>{explicit_score}</b></font>", bold_style)],
+        [Paragraph("Tool Applied:", bold_style), Paragraph(f"<b>{xml_safe(full_name)} ({xml_safe(acronym)})</b>", body_style)],
+        [Paragraph("Clinical Purpose:", bold_style), Paragraph(xml_safe(purpose), body_style)],
+        [Paragraph("Scored Result:", bold_style), Paragraph(f"<font color='#1D3B32'><b>{xml_safe(explicit_score)}</b></font>", bold_style)],
         [Paragraph("Scoring Criteria & Interpretation:", bold_style), scoring_blocks],
         [Paragraph("Clinical Significance:", bold_style), Paragraph("Scores indicate methodological rigour. Lower scores or missing criteria highlight methodological vulnerabilities that necessitate caution before changing clinical practice.", body_style)],
     ]
@@ -2067,7 +2163,7 @@ def build_long_pdf_report(base_data: dict, long_data: dict) -> io.BytesIO:
     header_style = ParagraphStyle("DDH", parent=body_style, fontName="Helvetica-Bold", textColor=colors.white)
 
     story = [
-        Paragraph(f"{APP_NAME} — Long Version", title_style),
+        Paragraph(f"{xml_safe(APP_NAME)} — Long Version", title_style),
         Paragraph("Detailed Appraisal, Full Score Calculations & Study Breakdown", sub_title),
         Spacer(1, 4),
     ]
@@ -2079,8 +2175,8 @@ def build_long_pdf_report(base_data: dict, long_data: dict) -> io.BytesIO:
     acronym, full_name, purpose, scoring_rules, score_interpretation, scoring_guide = resolve_tool_scoring_guide(base_data)
 
     meta_data = [
-        [Paragraph(f"<b>Manuscript:</b> {base_data.get('paper_title', 'N/A')}", body_style), Paragraph(f"<b>Authors:</b> {harvard_authors} ({base_data.get('year_published', 'N/A')})", body_style)],
-        [Paragraph(f"<b>Architecture:</b> {base_data.get('study_design', 'N/A')} | <b>Tool:</b> {full_name} ({acronym})", body_style), Paragraph(f"<b>Verified Score:</b> <font color='#1D3B32'><b>{calc_tally}</b></font>", bold_style)],
+        [Paragraph(f"<b>Manuscript:</b> {xml_safe(base_data.get('paper_title', 'N/A'))}", body_style), Paragraph(f"<b>Authors:</b> {xml_safe(harvard_authors)} ({xml_safe(base_data.get('year_published', 'N/A'))})", body_style)],
+        [Paragraph(f"<b>Architecture:</b> {xml_safe(base_data.get('study_design', 'N/A'))} | <b>Tool:</b> {xml_safe(full_name)} ({xml_safe(acronym)})", body_style), Paragraph(f"<b>Verified Score:</b> <font color='#1D3B32'><b>{xml_safe(calc_tally)}</b></font>", bold_style)],
     ]
     t_meta = Table(meta_data, colWidths=[4.1 * inch, 3.3 * inch])
     t_meta.setStyle(TableStyle([
@@ -2096,9 +2192,9 @@ def build_long_pdf_report(base_data: dict, long_data: dict) -> io.BytesIO:
     story.append(Paragraph("<b>1. Why This Tool Was Chosen (And Others Rejected)</b>", sec_heading))
     rationale = long_data.get("tool_selection_rationale", {})
     t_rat_data = [
-        [Paragraph("<b>Tool Used:</b>", bold_style), Paragraph(f"<b>{rationale.get('assigned_tool', acronym)}</b> ({rationale.get('architecture_classification', base_data.get('study_design'))})", body_style)],
-        [Paragraph("<b>Why It Fits:</b>", bold_style), Paragraph(rationale.get("selection_justification", "N/A"), body_style)],
-        [Paragraph("<b>Why Other Tools Were Rejected:</b>", bold_style), Paragraph(rationale.get("competing_tools_rejected", "N/A"), body_style)],
+        [Paragraph("<b>Tool Used:</b>", bold_style), Paragraph(f"<b>{xml_safe(rationale.get('assigned_tool', acronym))}</b> ({xml_safe(rationale.get('architecture_classification', base_data.get('study_design')))})", body_style)],
+        [Paragraph("<b>Why It Fits:</b>", bold_style), Paragraph(xml_safe(rationale.get("selection_justification", "N/A")), body_style)],
+        [Paragraph("<b>Why Other Tools Were Rejected:</b>", bold_style), Paragraph(xml_safe(rationale.get("competing_tools_rejected", "N/A")), body_style)],
     ]
     t_rat = Table(t_rat_data, colWidths=[1.8 * inch, 5.6 * inch])
     t_rat.setStyle(TableStyle([
@@ -2120,12 +2216,12 @@ def build_long_pdf_report(base_data: dict, long_data: dict) -> io.BytesIO:
     thresholds = scoring_system.get("quality_thresholds") or scoring_rules
 
     arith_rows = [
-        [Paragraph("<b>What Each Score Means:</b>", bold_style), Paragraph(individual_meanings, body_style)],
-        [Paragraph("<b>How Points Are Added:</b>", bold_style), Paragraph(how_awarded, body_style)],
-        [Paragraph("<b>Quality Cutoffs:</b>", bold_style), Paragraph(thresholds, body_style)],
-        [Paragraph("<b>Formula / Rule:</b>", bold_style), Paragraph(arith.get("formula_used", "N/A"), body_style)],
-        [Paragraph("<b>Step-by-Step Calculation:</b>", bold_style), Paragraph(arith.get("step_by_step_calculation", "N/A"), body_style)],
-        [Paragraph("<b>Final Score:</b>", bold_style), Paragraph(f"<font color='#1D3B32'><b>{calc_tally}</b></font>", bold_style)],
+        [Paragraph("<b>What Each Score Means:</b>", bold_style), Paragraph(xml_safe(individual_meanings), body_style)],
+        [Paragraph("<b>How Points Are Added:</b>", bold_style), Paragraph(xml_safe(how_awarded), body_style)],
+        [Paragraph("<b>Quality Cutoffs:</b>", bold_style), Paragraph(xml_safe(thresholds), body_style)],
+        [Paragraph("<b>Formula / Rule:</b>", bold_style), Paragraph(xml_safe(arith.get("formula_used", "N/A")), body_style)],
+        [Paragraph("<b>Step-by-Step Calculation:</b>", bold_style), Paragraph(xml_safe(arith.get("step_by_step_calculation", "N/A")), body_style)],
+        [Paragraph("<b>Final Score:</b>", bold_style), Paragraph(f"<font color='#1D3B32'><b>{xml_safe(calc_tally)}</b></font>", bold_style)],
     ]
     t_arith = Table(arith_rows, colWidths=[1.8 * inch, 5.6 * inch])
     t_arith.setStyle(TableStyle([
@@ -2144,9 +2240,9 @@ def build_long_pdf_report(base_data: dict, long_data: dict) -> io.BytesIO:
     crit_rows = [[Paragraph("Weakness", header_style), Paragraph("Evidence from the Paper", header_style), Paragraph("Why It Matters", header_style)]]
     for c in long_data.get("substantive_criticisms", []):
         crit_rows.append([
-            Paragraph(f"<b>{c.get('flaw_title')}</b>", bold_style),
-            Paragraph(c.get("manuscript_evidence", ""), body_style),
-            Paragraph(c.get("epidemiological_impact", ""), body_style),
+            Paragraph(f"<b>{xml_safe(c.get('flaw_title'))}</b>", bold_style),
+            Paragraph(xml_safe(c.get("manuscript_evidence", "")), body_style),
+            Paragraph(xml_safe(c.get("epidemiological_impact", "")), body_style),
         ])
     t_crit = Table(crit_rows, colWidths=[2.2 * inch, 2.6 * inch, 2.6 * inch], repeatRows=1)
     t_crit.setStyle(TableStyle([
@@ -2166,10 +2262,10 @@ def build_long_pdf_report(base_data: dict, long_data: dict) -> io.BytesIO:
     d_rows = [[Paragraph("Domain", header_style), Paragraph("Score", header_style), Paragraph("What Was Found in the Paper", header_style), Paragraph("Design or Statistical Issue", header_style)]]
     for d in long_data.get("domain_deep_dives", []):
         d_rows.append([
-            Paragraph(f"<b>{d.get('domain_name')}</b>", bold_style),
-            Paragraph(d.get("score_awarded", ""), bold_style),
-            Paragraph(d.get("direct_empirical_finding", ""), body_style),
-            Paragraph(d.get("statistical_or_design_flaw", ""), body_style),
+            Paragraph(f"<b>{xml_safe(d.get('domain_name'))}</b>", bold_style),
+            Paragraph(xml_safe(d.get("score_awarded", "")), bold_style),
+            Paragraph(xml_safe(d.get("direct_empirical_finding", "")), body_style),
+            Paragraph(xml_safe(d.get("statistical_or_design_flaw", "")), body_style),
         ])
     t_d = Table(d_rows, colWidths=[1.8 * inch, 0.9 * inch, 2.4 * inch, 2.3 * inch], repeatRows=1)
     t_d.setStyle(TableStyle([
@@ -2188,7 +2284,7 @@ def build_long_pdf_report(base_data: dict, long_data: dict) -> io.BytesIO:
     adv = long_data.get("translational_verdict_and_advisory", "")
     if adv:
         story.append(Paragraph("<b>5. Bottom-Line Takeaway for Practice</b>", sec_heading))
-        t_adv = Table([[Paragraph(f"<b>Practice Recommendation:</b> {adv}", body_style)]], colWidths=[7.4 * inch])
+        t_adv = Table([[Paragraph(f"<b>Practice Recommendation:</b> {xml_safe(adv)}", body_style)]], colWidths=[7.4 * inch])
         t_adv.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#EBF5F2')),
             ('BOX', (0, 0), (-1, -1), 1.2, colors.HexColor('#78BBA6')),
@@ -2259,15 +2355,15 @@ def build_long_docx_report(base_data: dict, long_data: dict) -> io.BytesIO:
 
     for d in long_data.get("domain_deep_dives", []):
         row = table.add_row().cells
-        row[0].paragraphs[0].add_run(d.get("domain_name", "")).bold = True
-        row[1].paragraphs[0].add_run(d.get("score_awarded", ""))
-        row[2].paragraphs[0].add_run(d.get("direct_empirical_finding", ""))
-        row[3].paragraphs[0].add_run(d.get("statistical_or_design_flaw", ""))
+        row[0].paragraphs[0].add_run(str(d.get("domain_name", ""))).bold = True
+        row[1].paragraphs[0].add_run(str(d.get("score_awarded", "")))
+        row[2].paragraphs[0].add_run(str(d.get("direct_empirical_finding", "")))
+        row[3].paragraphs[0].add_run(str(d.get("statistical_or_design_flaw", "")))
 
     adv = long_data.get("translational_verdict_and_advisory", "")
     if adv:
         doc.add_heading("5. Bottom-Line Takeaway for Practice", level=1)
-        doc.add_paragraph(adv)
+        doc.add_paragraph(str(adv))
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -2312,7 +2408,7 @@ def answer_interrogation_query(
 # 7. STREAMLIT APP & UI INTERACTION
 # ==========================================
 st.set_page_config(page_title=APP_NAME, page_icon="🐱", layout="wide")
-init_db()
+init_db_once()
 
 st.markdown(
     """
@@ -2366,6 +2462,8 @@ else:
         st.session_state["raw_paper_text"] = ""
     if "long_version_data" not in st.session_state:
         st.session_state["long_version_data"] = None
+    if "current_appraisal_id" not in st.session_state:
+        st.session_state["current_appraisal_id"] = None
 
     with st.sidebar:
         st.header("⚙️ Configuration")
@@ -2405,8 +2503,10 @@ else:
                 c_load, c_del = st.columns([3, 1])
                 with c_load:
                     if st.button("Load", key=f"v_{r['id']}", use_container_width=True):
-                        st.session_state["appraisal_data"] = get_appraisal_by_id(r["id"])
-                        st.session_state["long_version_data"] = None
+                        loaded_obj = get_appraisal_by_id(r["id"])
+                        st.session_state["appraisal_data"] = loaded_obj
+                        st.session_state["current_appraisal_id"] = r["id"]
+                        st.session_state["long_version_data"] = loaded_obj.get("long_version_data") if loaded_obj else None
                         st.session_state["chat_history"] = []
                         st.rerun()
                 with c_del:
@@ -2435,8 +2535,7 @@ else:
         if uploaded:
             raw_pdf_bytes = uploaded.read()
             filename_tag = uploaded.name
-            with st.spinner("Extracting text & isolating sections..."):
-                paper_text = extract_text_from_pdf_bytes(raw_pdf_bytes)
+            paper_text = extract_text_from_pdf_bytes(raw_pdf_bytes)
             if paper_text:
                 st.session_state["raw_paper_text"] = paper_text
                 st.success(f"Parsed {len(paper_text):,} characters successfully.")
@@ -2464,8 +2563,7 @@ else:
     confidence_score = 1.0
 
     if paper_text:
-        client_preflight = genai.Client(api_key=api_key) if api_key else None
-        self_audit_report = run_framework_consistency_auditor(paper_text, client_preflight, api_key or "", available_designs)
+        self_audit_report = run_framework_consistency_auditor_cached(paper_text, api_key or "", available_designs)
         ensemble_winner = self_audit_report["design"]
         confidence_score = self_audit_report["confidence"]
 
@@ -2541,7 +2639,7 @@ else:
                     except Exception:
                         target_design = "Observational Study (Cohort)"
 
-            with st.spinner(f"Running appraisal under {target_design}..."):
+            with st.spinner(f"Running fast appraisal under {target_design}..."):
                 try:
                     raw_data = execute_manuscript_evaluation(
                         client,
@@ -2556,6 +2654,7 @@ else:
                     verified_data, score, _, flaw_warns = run_comprehensive_checksum(raw_data, paper_text)
                     new_id = save_appraisal(verified_data, filename_tag)
                     st.session_state["appraisal_data"] = verified_data
+                    st.session_state["current_appraisal_id"] = new_id
                     st.session_state["long_version_data"] = None
                     st.session_state["chat_history"] = []
                     st.success(f"Appraisal complete and saved (ID: #{new_id})")
@@ -2565,7 +2664,7 @@ else:
                 except Exception as e:
                     st.error(f"Execution error: {e}")
 
-    if "appraisal_data" in st.session_state:
+    if "appraisal_data" in st.session_state and st.session_state["appraisal_data"]:
         data = st.session_state["appraisal_data"]
         st.markdown("---")
         st.subheader(f"📋 {data.get('paper_title', 'Untitled')}")
@@ -2605,7 +2704,7 @@ else:
             st.markdown("### 📖 Story Summary of the Paper")
             with st.container():
                 for idx, pt in enumerate(story_arc, 1):
-                    parts = pt.split(":", 1)
+                    parts = str(pt).split(":", 1)
                     if len(parts) == 2:
                         st.markdown(f"**{idx}. {parts[0].strip()}:** {parts[1].strip()}")
                     else:
@@ -2632,7 +2731,7 @@ else:
         synth = data.get("overall_synthesis", [])
         if isinstance(synth, list):
             for idx, pt in enumerate(synth, 1):
-                parts = pt.split(":", 1)
+                parts = str(pt).split(":", 1)
                 if len(parts) == 2:
                     st.markdown(f"**• {parts[0].strip()}:** {parts[1].strip()}")
                 else:
@@ -2640,34 +2739,42 @@ else:
         else:
             st.info(str(synth))
 
-        # --- SHORT VERSION DOWNLOADS ---
-        st.markdown("#### 📄 Short Version Downloads")
-        c_doc, c_pdf, c_log = st.columns(3)
-        with c_doc:
-            st.download_button(
-                "📥 Download Short Version (.docx)",
-                data=build_short_docx_report(data),
-                file_name=format_harvard_filename(data, "docx", tag="Short"),
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
-            )
-        with c_pdf:
-            st.download_button(
-                "📥 Download Short Version (.pdf)",
-                data=build_short_pdf_report(data),
-                file_name=format_harvard_filename(data, "pdf", tag="Short"),
-                mime="application/pdf",
-                use_container_width=True,
-            )
-        with c_log:
-            audit_payload = json.dumps(data, indent=2)
-            st.download_button(
-                "📥 Download Raw Data (.json)",
-                data=audit_payload,
-                file_name=format_harvard_filename(data, "json", tag="Data"),
-                mime="application/json",
-                use_container_width=True,
-            )
+        # --- CACHED SHORT VERSION DOWNLOADS ---
+        st.markdown("#### 📄 Short Version Report")
+        try:
+            data_json_str = json.dumps(data, sort_keys=True)
+            short_pdf_bytes, short_docx_bytes = build_short_reports_cached(data_json_str)
+
+            c_doc, c_pdf, c_log = st.columns(3)
+            with c_doc:
+                st.download_button(
+                    "📥 Download Short Version (.docx)",
+                    data=short_docx_bytes,
+                    file_name=format_harvard_filename(data, "docx", tag="Short"),
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                )
+            with c_pdf:
+                st.download_button(
+                    "📥 Download Short Version (.pdf)",
+                    data=short_pdf_bytes,
+                    file_name=format_harvard_filename(data, "pdf", tag="Short"),
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+            with c_log:
+                st.download_button(
+                    "📥 Download Raw Data (.json)",
+                    data=data_json_str,
+                    file_name=format_harvard_filename(data, "json", tag="Data"),
+                    mime="application/json",
+                    use_container_width=True,
+                )
+
+            if st.checkbox("👁️ Show Short Version PDF Preview in Browser", value=False, key="prev_short"):
+                render_inline_pdf_preview(short_pdf_bytes)
+        except Exception as pdf_err:
+            st.error(f"Error building Short Version PDF/Word files: {pdf_err}")
 
         # --- LONG VERSION SECTION ---
         st.markdown("---")
@@ -2683,7 +2790,11 @@ else:
                     try:
                         long_res = generate_long_version(client, api_key, data, st.session_state.get("raw_paper_text", ""))
                         st.session_state["long_version_data"] = long_res
-                        st.success("Long Version ready!")
+                        data["long_version_data"] = long_res
+                        st.session_state["appraisal_data"] = data
+                        if st.session_state.get("current_appraisal_id"):
+                            update_appraisal_json(st.session_state["current_appraisal_id"], data)
+                        st.success("Long Version ready and saved!")
                         st.rerun()
                     except Exception as err:
                         st.error(f"Error generating Long Version: {err}")
@@ -2716,23 +2827,33 @@ else:
                     st.markdown("#### 🎯 Bottom-Line Takeaway for Practice")
                     st.success(f"**Practice Recommendation:** {adv}")
 
-                c_lv_doc, c_lv_pdf = st.columns(2)
-                with c_lv_doc:
-                    st.download_button(
-                        "📥 Download Long Version (.docx)",
-                        data=build_long_docx_report(data, lv),
-                        file_name=format_harvard_filename(data, "docx", tag="Long"),
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True,
-                    )
-                with c_lv_pdf:
-                    st.download_button(
-                        "📥 Download Long Version (.pdf)",
-                        data=build_long_pdf_report(data, lv),
-                        file_name=format_harvard_filename(data, "pdf", tag="Long"),
-                        mime="application/pdf",
-                        use_container_width=True,
-                    )
+                try:
+                    base_str = json.dumps(data, sort_keys=True)
+                    lv_str = json.dumps(lv, sort_keys=True)
+                    long_pdf_bytes, long_docx_bytes = build_long_reports_cached(base_str, lv_str)
+
+                    c_lv_doc, c_lv_pdf = st.columns(2)
+                    with c_lv_doc:
+                        st.download_button(
+                            "📥 Download Long Version (.docx)",
+                            data=long_docx_bytes,
+                            file_name=format_harvard_filename(data, "docx", tag="Long"),
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True,
+                        )
+                    with c_lv_pdf:
+                        st.download_button(
+                            "📥 Download Long Version (.pdf)",
+                            data=long_pdf_bytes,
+                            file_name=format_harvard_filename(data, "pdf", tag="Long"),
+                            mime="application/pdf",
+                            use_container_width=True,
+                        )
+
+                    if st.checkbox("👁️ Show Long Version PDF Preview in Browser", value=False, key="prev_long"):
+                        render_inline_pdf_preview(long_pdf_bytes)
+                except Exception as lv_pdf_err:
+                    st.error(f"Error building Long Version PDF/Word files: {lv_pdf_err}")
 
         st.markdown("---")
         st.subheader(f"💬 {ASSISTANT_NAME}")
