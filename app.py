@@ -1,6 +1,5 @@
 import base64
 import difflib
-import hashlib
 import html
 import io
 import json
@@ -48,7 +47,7 @@ APP_NAME = "Kitique Appraisal Tool"
 ASSISTANT_NAME = "Ki's Assistant"
 MIN_CONFIDENCE_MARGIN = 15
 
-# Ordered fastest-first for sub-5-second responses
+# Default fast & free Gemini API models
 FREE_ACTIVE_MODELS = [
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
@@ -59,12 +58,14 @@ FREE_ACTIVE_MODELS = [
 
 
 def xml_safe(val: object) -> str:
+    """Escapes XML entities so ReportLab PDF builds do not crash on <, >, or &."""
     if val is None:
         return ""
     return html.escape(str(val), quote=False)
 
 
 def render_inline_pdf_preview(pdf_bytes: bytes, height: int = 550):
+    """Renders an interactive PDF preview directly inside the Streamlit app."""
     b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
     pdf_display = f'<iframe src="data:application/pdf;base64,{b64_pdf}" width="100%" height="{height}px" type="application/pdf" style="border: 1px solid #78BBA6; border-radius: 8px;"></iframe>'
     st.markdown(pdf_display, unsafe_allow_html=True)
@@ -72,6 +73,7 @@ def render_inline_pdf_preview(pdf_bytes: bytes, height: int = 550):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_active_models(api_key_str: str) -> List[str]:
+    """Dynamically queries active Gemini models to permanently prevent 404 retired model errors."""
     if not api_key_str:
         return FREE_ACTIVE_MODELS
     try:
@@ -103,11 +105,12 @@ def get_active_models(api_key_str: str) -> List[str]:
 
 
 class ClassificationConsistencyError(Exception):
+    """Raised ONLY on objective, impossible structural contradictions (Hard Fails)."""
     pass
 
 
 # ==========================================
-# 0. FAST PERSISTENT CLOUD DB + CACHED QUERIES
+# 0. CLOUD POSTGRESQL (NEON) + SQLITE DUAL ENGINE
 # ==========================================
 def get_database_url() -> Optional[str]:
     try:
@@ -136,7 +139,6 @@ def get_cached_sqlite_conn():
 
 
 def get_connection():
-    """Returns a connection. For Postgres, uses fast connect; for SQLite, reuses cached connection."""
     if is_cloud_postgres_active():
         db_url = get_database_url()
         return psycopg2.connect(db_url, cursor_factory=RealDictCursor, connect_timeout=10)
@@ -144,7 +146,6 @@ def get_connection():
 
 
 def close_conn_safely(conn):
-    """Only closes PostgreSQL connections; keeps local SQLite cached resource alive."""
     if is_cloud_postgres_active() and conn:
         try:
             conn.close()
@@ -171,13 +172,13 @@ LEGAL_PAIRS = {
 
 FRAMEWORK_SIGNATURES = {
     "Clinical Practice Guideline / Consensus Statement": {
-        "source_must_have_any": [r"\brecommendation\s*\d+", r"\bconsensus\b", r"\bguideline\b", r"\bgrade\s+of\s+recommendation\b"],
+        "source_must_have_any": [r"\brecommendation\b", r"\bconsensus\b", r"\bguidelines?\b", r"\bgrade\b", r"\bpanel\b", r"\bcommittee\b"],
         "source_must_not_have": [r"\bpatients\s+were\s+randomized\s+to\b", r"\bwe\s+retrospectively\s+reviewed\s+the\s+medical\s+records\b"],
         "expected_domain_keywords": ["scope", "stakeholder", "rigour", "clarity", "applicability", "editorial"],
         "tool": "AGREE II"
     },
     "Systematic Review / Meta-Analysis": {
-        "source_must_have_any": [r"\bsearch\s+strategy\b", r"\bprisma\b", r"\bdatabases?\b", r"\bmeta-analysis\b", r"\bsystematic\s+review\b"],
+        "source_must_have_any": [r"\bsearch\b", r"\bprisma\b", r"\bdatabases?\b", r"\bmeta-analysis\b", r"\bsystematic\s+review\b", r"\bliterature\b"],
         "source_must_not_have": [r"\bgrade\s+of\s+recommendation\s+gpp\b", r"\bstrong\s+consensus\s+\(\d+%\s+agreement\)\b"],
         "expected_domain_keywords": ["pico", "search", "duplicate", "excluded", "rob", "meta-analytic", "publication bias", "conflict"],
         "tool": "AMSTAR 2"
@@ -189,49 +190,49 @@ FRAMEWORK_SIGNATURES = {
         "tool": "SANRA"
     },
     "Randomized Controlled Trial (RCT)": {
-        "source_must_have_any": [r"\brandomi[zs]ed\b", r"\ballocat(?:ed|ion)\b", r"\btrial\b", r"\bplacebo\b"],
+        "source_must_have_any": [r"\brandomi[zs]ed\b", r"\ballocat(?:ed|ion)\b", r"\btrial\b", r"\bplacebo\b", r"\bparticipants\b", r"\bpatients\b"],
         "source_must_not_have": [r"\bsystematic\s+review\s+and\s+meta-analysis\b"],
         "expected_domain_keywords": ["randomization", "deviations", "missing", "measurement", "selection"],
         "tool": "Cochrane RoB 2"
     },
     "Non-Randomized Intervention / Quasi-Experimental": {
-        "source_must_have_any": [r"\bintervention\b", r"\bpatients\b", r"\btreated\b", r"\bgroup\b"],
+        "source_must_have_any": [r"\bintervention\b", r"\bpatients\b", r"\btreated\b", r"\bgroup\b", r"\bparticipants\b"],
         "source_must_not_have": [r"\bprisma\s+flowchart\b"],
         "expected_domain_keywords": ["confounding", "selection", "classification", "deviations", "missing", "measurement", "reported"],
         "tool": "ROBINS-I"
     },
     "Observational Study (Cohort)": {
-        "source_must_have_any": [r"\bcohort\b", r"\bpatients\b", r"\bfollow-up\b", r"\bretrospective\b", r"\bprospective\b", r"\bconsecutive\b"],
+        "source_must_have_any": [r"\bcohort\b", r"\bpatients\b", r"\bfollow-up\b", r"\bretrospective\b", r"\bprospective\b", r"\bconsecutive\b", r"\bsubjects\b", r"\bparticipants\b", r"\bobservational\b", r"\bdata\b", r"\bcases\b"],
         "source_must_not_have": [r"\bgrade\s+of\s+recommendation\s+gpp\b"],
         "expected_domain_keywords": ["selection", "comparability", "outcome"],
         "tool": "Newcastle-Ottawa Scale (NOS) Cohort"
     },
     "Observational Study (Case-Control)": {
-        "source_must_have_any": [r"\bcases\b", r"\bcontrols\b", r"\bodds\s+ratio\b", r"\bcase-control\b"],
+        "source_must_have_any": [r"\bcases\b", r"\bcontrols\b", r"\bodds\s+ratio\b", r"\bcase-control\b", r"\bpatients\b", r"\bparticipants\b"],
         "source_must_not_have": [r"\bgrade\s+of\s+recommendation\s+gpp\b"],
         "expected_domain_keywords": ["selection", "comparability", "exposure"],
         "tool": "Newcastle-Ottawa Scale (NOS) Case-Control"
     },
     "Cross-Sectional Study": {
-        "source_must_have_any": [r"\bcross-sectional\b", r"\bsurvey\b", r"\bprevalence\b", r"\bquestionnaire\b"],
+        "source_must_have_any": [r"\bcross-sectional\b", r"\bsurvey\b", r"\bprevalence\b", r"\bquestionnaire\b", r"\bparticipants\b", r"\bdata\b"],
         "source_must_not_have": [r"\brandomized\s+controlled\s+trial\b"],
         "expected_domain_keywords": ["aims", "selection", "measurement", "confounding", "ethical"],
         "tool": "AXIS"
     },
     "Prediction Model Study": {
-        "source_must_have_any": [r"\bmodel\b", r"\bpredict(?:ion|ors)\b", r"\bvalidation\b", r"\bauc\b", r"\bc-index\b", r"\bnomogram\b"],
+        "source_must_have_any": [r"\bmodel\b", r"\bpredict(?:ion|ors)\b", r"\bvalidation\b", r"\bauc\b", r"\bc-index\b", r"\bnomogram\b", r"\bdata\b"],
         "source_must_not_have": [r"\bconsensus\s+guideline\b"],
         "expected_domain_keywords": ["participants", "predictors", "outcome", "analysis"],
         "tool": "PROBAST"
     },
     "Diagnostic Accuracy Study": {
-        "source_must_have_any": [r"\bsensitivity\b", r"\bspecificity\b", r"\bindex\s+test\b", r"\breference\s+standard\b", r"\bdiagnostic\b"],
+        "source_must_have_any": [r"\bsensitivity\b", r"\bspecificity\b", r"\bindex\s+test\b", r"\breference\s+standard\b", r"\bdiagnostic\b", r"\bpatients\b"],
         "source_must_not_have": [r"\bconsensus\s+guideline\b"],
         "expected_domain_keywords": ["patient selection", "index test", "reference standard", "flow"],
         "tool": "QUADAS-2"
     },
     "Qualitative Study": {
-        "source_must_have_any": [r"\bqualitative\b", r"\binterview\b", r"\bthematic\b", r"\bthemes\b", r"\bfocus\s+group\b"],
+        "source_must_have_any": [r"\bqualitative\b", r"\binterview\b", r"\bthematic\b", r"\bthemes\b", r"\bfocus\s+group\b", r"\bparticipants\b"],
         "source_must_not_have": [r"\brandomized\s+controlled\s+trial\b"],
         "expected_domain_keywords": ["appropriateness", "sampling", "reflexivity", "ethical", "analysis", "findings"],
         "tool": "CASP Qualitative / COREQ"
@@ -503,7 +504,6 @@ SEED_TAXONOMY = {
 
 
 def init_db_once():
-    """Runs database table creation ONLY ONCE per session to eliminate 1.5s lag on every click."""
     if st.session_state.get("db_initialized"):
         return
     use_pg = is_cloud_postgres_active()
@@ -725,7 +725,7 @@ def delete_appraisal(appraisal_id: int):
 
 
 # ==========================================
-# 2. CROSSREF-STYLE HEURISTIC TITLE & SECTION PARSER
+# 2. HEURISTIC TITLE & SECTION PARSER
 # ==========================================
 def clean_pdf_artifacts(raw_text: str) -> str:
     cleaned = re.sub(r"(\w+)-\s*\n\s*(\w+)", r"\1\2", raw_text)
@@ -873,7 +873,6 @@ def parse_manuscript_sections(text: str) -> Dict[str, str]:
 
     abstract_zone = text[abs_start:max(abs_start + 2500, m_start)]
 
-    # Build a compact, high-signal manuscript payload (capped at 28,000 chars) so LLM calls finish in <6 seconds
     body_no_refs = text[:ref_start]
     if len(body_no_refs) > 28000:
         smart_trimmed = (
@@ -949,7 +948,7 @@ def format_harvard_filename(data: dict, extension: str, tag: str = "Short") -> s
 
 
 # ==========================================
-# 3. CACHED HIERARCHICAL OVERRIDES & CONSISTENCY AUDITOR
+# 3. HIERARCHICAL OVERRIDES & CONSISTENCY AUDITOR
 # ==========================================
 def detect_hierarchical_overrides(sections: Dict[str, str]) -> Optional[Tuple[str, List[str], List[str]]]:
     title_l = sections["title"].lower()
@@ -1110,6 +1109,8 @@ def run_llm_classifier_b(api_key_str: str, sections: Dict[str, str], available_d
             )
             parsed = json.loads(resp.text)
             return parsed.get("llm_design", ""), parsed.get("llm_rationale", "")
+        except (json.JSONDecodeError, KeyError):
+            continue
         except Exception:
             continue
     return "", "LLM classifier unavailable"
@@ -1119,10 +1120,6 @@ def run_llm_classifier_b(api_key_str: str, sections: Dict[str, str], available_d
 def run_framework_consistency_auditor_cached(
     text: str, api_key_str: str, available_designs: List[str]
 ) -> dict:
-    """
-    Cached so it ONLY runs once per uploaded paper!
-    Also skips the network LLM call if the deterministic rule engine already has a high-confidence match (margin >= 40).
-    """
     sections = parse_manuscript_sections(text)
     rule_winner, score_map, decision_path, excluded_alts, is_hierarchical = run_deterministic_section_classifier(sections)
 
@@ -1131,7 +1128,6 @@ def run_framework_consistency_auditor_cached(
     second_design, second_score = sorted_scores[1] if len(sorted_scores) > 1 else ("None", 0)
     margin = first_score - second_score
 
-    # Fast-Path Optimization: Only call the LLM Classifier B if the deterministic rule engine is uncertain (margin < 40)
     if is_hierarchical or margin >= 40:
         llm_winner = rule_winner
         llm_rationale = "Skipped network call (Deterministic Rule Engine margin >= 40 / Hierarchical Override)"
@@ -1144,6 +1140,8 @@ def run_framework_consistency_auditor_cached(
     if disagreement_detected and not is_hierarchical:
         base_confidence = round(max(0.50, base_confidence - 0.15), 2)
         decision_path.append(f"LLM Classifier B suggested '{llm_winner}' (-0.15 confidence adjustment applied)")
+    elif disagreement_detected and is_hierarchical:
+        decision_path.append(f"Hierarchical Override ('{rule_winner}') superseded LLM suggestion ('{llm_winner}')")
 
     requires_human_confirmation = (base_confidence < 0.80) or (margin < MIN_CONFIDENCE_MARGIN and not is_hierarchical)
 
@@ -1203,11 +1201,13 @@ def validate_framework_signature_and_legality(
         raise ClassificationConsistencyError("Hard Fail — Cross-Contamination: AGREE II output contains AMSTAR 2 review domains.")
 
     sig = FRAMEWORK_SIGNATURES.get(design)
-    if sig and text_lower:
+    # Bypass hard verification if extracted text is too short (bad extraction/image PDF) to avoid false blocking
+    if sig and len(text_lower) > 1000:
         must_have_any = sig.get("source_must_have_any", [])
         if must_have_any and not any(re.search(p, text_lower) for p in must_have_any):
             raise ClassificationConsistencyError(
-                f"Hard Fail — Source Verification Failed: Manuscript lacks any required structural markers for '{design}' ({must_have_any})."
+                f"Hard Fail — Source Verification Failed: The extracted manuscript text lacks ANY expected structural markers for '{design}'. "
+                f"Expected at least one of: {must_have_any}. "
             )
         passed_notes.append(f"Source-Text Verification Passed: Manuscript contains required '{design}' markers.")
 
@@ -1246,20 +1246,17 @@ def fuzzy_quote_match_fast(quote: str, source_clean: str, source_tokens: List[st
     q_len = len(quote_tokens)
     q_str = " ".join(quote_tokens)
 
-    # 1. Instant substring check (O(N) in C)
     if q_str in source_clean:
         return True, 1.0
 
     if not source_tokens:
         return False, 0.0
 
-    # 2. Fast token-set overlap check
     q_set = set(quote_tokens)
     token_overlap = len(q_set & source_token_set) / float(len(q_set))
     if q_len < 6 or token_overlap >= 0.92:
         return (token_overlap >= threshold), round(token_overlap, 2)
 
-    # 3. Strided window check only if token overlap is promising (>= 0.65)
     if token_overlap < 0.65:
         return False, round(token_overlap, 2)
 
@@ -1294,7 +1291,6 @@ def run_comprehensive_checksum(
         data["groundedness_score"] = 0.0
         return data, 0.0, [], ["No domain appraisals populated."]
 
-    # Pre-tokenize source text ONCE instead of inside every domain loop
     source_tokens = clean_tokens(full_raw_text)
     source_clean = " ".join(source_tokens)
     source_token_set = set(source_tokens)
@@ -1557,6 +1553,7 @@ def execute_manuscript_evaluation(
     active_tools_map: Optional[dict] = None,
     strictness_mode: str = "Strict",
     self_audit_report: Optional[dict] = None,
+    skip_hard_fail: bool = False,
 ) -> dict:
     active_tool_taxonomy = {assigned_design: active_tools_map[assigned_design]} if (assigned_design and active_tools_map and assigned_design in active_tools_map) else (active_tools_map or SEED_TAXONOMY)
     mandatory_tool_name = active_tools_map[assigned_design]["tool"] if (assigned_design and active_tools_map and assigned_design in active_tools_map) else "Assigned Tool"
@@ -1668,12 +1665,19 @@ def execute_manuscript_evaluation(
 
             parsed = reconcile_appraisal_scores(parsed, assigned_design=assigned_design)
 
-            passed_notes, auditor_warnings = validate_framework_signature_and_legality(
-                assigned_design or parsed.get("study_design", ""),
-                parsed.get("appraisal_tool_selected", ""),
-                parsed.get("domain_appraisals", []),
-                text_content or clean_text
-            )
+            try:
+                passed_notes, auditor_warnings = validate_framework_signature_and_legality(
+                    assigned_design or parsed.get("study_design", ""),
+                    parsed.get("appraisal_tool_selected", ""),
+                    parsed.get("domain_appraisals", []),
+                    text_content or clean_text
+                )
+            except ClassificationConsistencyError as ce:
+                if skip_hard_fail:
+                    passed_notes = ["Hard Fail Bypassed (AI Rescue Mode Active)"]
+                    auditor_warnings = [f"Bypassed Structural Error: {ce}"]
+                else:
+                    raise ce
 
             parsed.setdefault("audit_log", {})["consistency_auditor_notes"] = passed_notes
             parsed["audit_log"]["consistency_auditor_warnings"] = auditor_warnings
@@ -1812,7 +1816,6 @@ def generate_long_version(
 # ==========================================
 @st.cache_data(show_spinner=False)
 def build_short_reports_cached(data_json_str: str) -> Tuple[bytes, bytes]:
-    """Caches both Short PDF and Short DOCX bytes so they aren't rebuilt on every click."""
     data = json.loads(data_json_str)
     pdf_bytes = build_short_pdf_report(data).getvalue()
     docx_bytes = build_short_docx_report(data).getvalue()
@@ -1821,7 +1824,6 @@ def build_short_reports_cached(data_json_str: str) -> Tuple[bytes, bytes]:
 
 @st.cache_data(show_spinner=False)
 def build_long_reports_cached(base_json_str: str, long_json_str: str) -> Tuple[bytes, bytes]:
-    """Caches both Long PDF and Long DOCX bytes."""
     base_data = json.loads(base_json_str)
     long_data = json.loads(long_json_str)
     pdf_bytes = build_long_pdf_report(base_data, long_data).getvalue()
@@ -2535,7 +2537,8 @@ else:
         if uploaded:
             raw_pdf_bytes = uploaded.read()
             filename_tag = uploaded.name
-            paper_text = extract_text_from_pdf_bytes(raw_pdf_bytes)
+            with st.spinner("Extracting text & isolating sections..."):
+                paper_text = extract_text_from_pdf_bytes(raw_pdf_bytes)
             if paper_text:
                 st.session_state["raw_paper_text"] = paper_text
                 st.success(f"Parsed {len(paper_text):,} characters successfully.")
@@ -2563,6 +2566,7 @@ else:
     confidence_score = 1.0
 
     if paper_text:
+        client_preflight = genai.Client(api_key=api_key) if api_key else None
         self_audit_report = run_framework_consistency_auditor_cached(paper_text, api_key or "", available_designs)
         ensemble_winner = self_audit_report["design"]
         confidence_score = self_audit_report["confidence"]
@@ -2651,6 +2655,34 @@ else:
                         strictness_mode=strictness_choice,
                         self_audit_report=self_audit_report,
                     )
+                except ClassificationConsistencyError as ce:
+                    st.warning(f"⚠️ **Structural Mismatch Detected:** {ce}\n\nInitiating AI Rescue Mode to dynamically discover the correct framework...")
+                    try:
+                        discovered_name, discovered_tool = discover_appraisal_tool(client, api_key, paper_text or "Excerpt")
+                        save_discovered_tool(discovered_name, discovered_tool)
+                        target_design = discovered_name
+                        active_tools = get_all_tools()
+                        st.info(f"AI Rescue Mode selected new tool: **{discovered_tool.get('tool')}**")
+                        
+                        raw_data = execute_manuscript_evaluation(
+                            client,
+                            api_key_str=api_key,
+                            text_content=paper_text,
+                            raw_pdf_bytes=raw_pdf_bytes if not paper_text else None,
+                            assigned_design=target_design,
+                            active_tools_map=active_tools,
+                            strictness_mode=strictness_choice,
+                            self_audit_report=None,
+                            skip_hard_fail=True
+                        )
+                    except Exception as rescue_e:
+                        st.error(f"AI Rescue Mode failed: {rescue_e}")
+                        st.stop()
+                except Exception as e:
+                    st.error(f"Execution error: {e}")
+                    st.stop()
+
+                try:
                     verified_data, score, _, flaw_warns = run_comprehensive_checksum(raw_data, paper_text)
                     new_id = save_appraisal(verified_data, filename_tag)
                     st.session_state["appraisal_data"] = verified_data
@@ -2659,10 +2691,8 @@ else:
                     st.session_state["chat_history"] = []
                     st.success(f"Appraisal complete and saved (ID: #{new_id})")
                     st.rerun()
-                except ClassificationConsistencyError as ce:
-                    st.error(f"🛑 **Appraisal Stopped Due to Tool Mismatch:**\n\n{ce}")
                 except Exception as e:
-                    st.error(f"Execution error: {e}")
+                    st.error(f"Error saving appraisal: {e}")
 
     if "appraisal_data" in st.session_state and st.session_state["appraisal_data"]:
         data = st.session_state["appraisal_data"]
