@@ -651,8 +651,7 @@ def save_appraisal(data: dict, source_name: str) -> int:
             )
             new_id = cur.lastrowid
         conn.commit()
-        if "fetch_all_appraisals_cached" in globals():
-            fetch_all_appraisals_cached.clear()
+        st.session_state.records_dirty = True
         return int(new_id)
     finally:
         close_conn_safely(conn)
@@ -671,8 +670,7 @@ def update_appraisal_json(appraisal_id: int, data: dict):
             (json.dumps(data), appraisal_id),
         )
         conn.commit()
-        if "fetch_all_appraisals_cached" in globals():
-            fetch_all_appraisals_cached.clear()
+        st.session_state.records_dirty = True
     except Exception:
         pass
     finally:
@@ -725,8 +723,7 @@ def delete_appraisal(appraisal_id: int):
         placeholder = "%s" if use_pg else "?"
         cur.execute(f"DELETE FROM appraisals WHERE id = {placeholder}", (appraisal_id,))
         conn.commit()
-        if "fetch_all_appraisals_cached" in globals():
-            fetch_all_appraisals_cached.clear()
+        st.session_state.records_dirty = True
     finally:
         close_conn_safely(conn)
 
@@ -817,7 +814,7 @@ def find_probable_title_and_header(text: str) -> Tuple[str, str]:
     category_tags = []
 
     for idx, line in enumerate(top_lines):
-        if len(line) < 40 and re.search(r"(?i)\b(?:guideline|consensus|original\s+article|review\s+article|clinical\s+trial)\b", line):
+        if len(line) < 40 and re.search(r"(?i)\b(?:guideline|consensus|original\s+article|review\s+article|clinical\s+trial|review)\b", line):
             category_tags.append(line)
 
         if boilerplate_patterns.search(line):
@@ -838,7 +835,7 @@ def find_probable_title_and_header(text: str) -> Tuple[str, str]:
         if 1 <= idx <= 18:
             score += 20
 
-        if re.search(r"(?i)\b(?:guideline|consensus|systematic\s+review|meta-analysis|randomized|trial|cohort|case-control|cross-sectional|prevalence|complications)\b", line):
+        if re.search(r"(?i)\b(?:guideline|consensus|systematic\s+review|meta-analysis|randomized|trial|cohort|case-control|cross-sectional|prevalence|complications|review)\b", line):
             score += 30
 
         if line.endswith("."):
@@ -865,7 +862,7 @@ def parse_manuscript_sections(text: str) -> Dict[str, str]:
     detected_title, title_zone = find_probable_title_and_header(text)
     lower = text.lower()
 
-    abs_match = re.search(r"\n(?:\s*)(?:abstract|summary|s\s+u\s+m\s+m\s+a\s+r\s+y|background\s+and\s+aims)\b", lower[:5000])
+    abs_match = re.search(r"\n(?:\s*)(?:abstract|summary|s\s+u\s+m\s+m\s+a\s+r\s+y|background\s+and\s+aims|importance)\b", lower[:5000])
     abs_start = abs_match.start() if abs_match else min(600, len(text))
 
     m_match = re.search(r"\n(?:\d+\.?\s*)?(?:methods|methodology|materials\s+and\s+methods|patients\s+and\s+methods|study\s+design|search\s+strategy)\b", lower)
@@ -1040,7 +1037,16 @@ def run_deterministic_section_classifier(sections: Dict[str, str]) -> Tuple[str,
         ("Diagnostic Accuracy Study", [r"\bdiagnostic\s+accuracy\b", r"\bsensitivity\s+and\s+specificity\b"], 75),
         ("Prediction Model Study", [r"\bprediction\s+model\b", r"\bprognostic\s+model\b", r"\brisk\s+score\b"], 75),
         ("Qualitative Study", [r"\bqualitative\b", r"\bthematic\s+analysis\b"], 75),
-        ("Narrative Review", [r"\bnarrative\s+review\b", r"\bliterature\s+review\b", r"\bscoping\s+review\b"], 70),
+        ("Narrative Review", [
+            r"\bnarrative\s+review\b",
+            r"\bliterature\s+review\b",
+            r"\bscoping\s+review\b",
+            r"\bclinical\s+review\b",
+            r"\ba\s+review\b",
+            r"\|\s*review\b",
+            r"\breview\s+article\b",
+            r"\bstate-of-the-art\s+review\b",
+        ], 75),
     ]
 
     for design, patterns, pts in title_rules:
@@ -1066,15 +1072,14 @@ def run_deterministic_section_classifier(sections: Dict[str, str]) -> Tuple[str,
         scores["Cross-Sectional Study"] += 60
         decision_path.append("Methods/Abstract describes cross-sectional survey (+60 Cross-Sectional)")
 
-    if re.search(r"\b(?:review\s+of\s+the\s+literature|this\s+review\s+summarizes|narrative\s+overview)\b", abs_l + meth_l) and scores["Observational Study (Cohort)"] < 30:
+    if re.search(r"\b(?:review\s+of\s+the\s+literature|this\s+(?:comprehensive\s+|clinical\s+)?review\s+(?:summarizes|synthesizes|reflects|examines|discusses)|narrative\s+overview)\b", abs_l + meth_l) and scores["Observational Study (Cohort)"] < 30:
         scores["Narrative Review"] += 55
-        decision_path.append("Abstract/Methods describes non-systematic literature overview (+55 Narrative Review)")
+        decision_path.append("Abstract/Body describes non-systematic clinical review (+55 Narrative Review)")
 
     winner = max(scores, key=scores.get)
     if scores[winner] <= 0:
         winner = "Observational Study (Cohort)"
-        scores[winner] = 40
-        decision_path.append("Defaulted to Observational Study (Cohort) based on clinical structure")
+        decision_path.append("No deterministic rules matched (0 pts) — deferring to AI Verifier")
 
     return winner, scores, decision_path, excluded_alternatives, False
 
@@ -1118,7 +1123,8 @@ def run_llm_classifier_b(api_key_str: str, sections: Dict[str, str], available_d
     except Exception:
         pass
     
-    for model_name in [m for m in st.session_state.active_models if m != PRIMARY_MODEL]:
+    fallback_models = st.session_state.get("active_models", FREE_ACTIVE_MODELS)
+    for model_name in [m for m in fallback_models if m != PRIMARY_MODEL]:
         try:
             resp = client.models.generate_content(
                 model=model_name,
@@ -1149,6 +1155,9 @@ def run_framework_consistency_auditor_cached(
         llm_rationale = f"Skipped network call (Deterministic Rule Engine margin {margin} >= {MIN_CONFIDENCE_MARGIN})"
     else:
         llm_winner, llm_rationale = run_llm_classifier_b(api_key_str, sections, available_designs)
+        if first_score == 0 and llm_winner and llm_winner in score_map:
+            rule_winner = llm_winner
+            decision_path.append(f"AI Verifier resolved 0-point fallback to '{llm_winner}'")
 
     base_confidence = 0.98 if is_hierarchical else min(0.95, round(0.75 + (margin / 250.0), 2))
     disagreement_detected = bool(llm_winner and llm_winner in score_map and llm_winner != rule_winner)
@@ -1175,7 +1184,7 @@ def run_framework_consistency_auditor_cached(
         "tool": expected_tool,
         "status": status,
         "hierarchical_override": is_hierarchical,
-        "classifier_a_rule_engine": f"{rule_winner} ({first_score} pts; runner-up: {second_design} at {second_score} pts)",
+        "classifier_a_rule_engine": f"{first_design} ({first_score} pts; runner-up: {second_design} at {second_score} pts)",
         "classifier_b_llm": f"{llm_winner or 'Not Run'} ({llm_rationale})",
         "confidence_margin": margin,
         "disagreement_detected": disagreement_detected,
@@ -1369,7 +1378,8 @@ def discover_appraisal_tool(client: genai.Client, api_key_str: str, text_sample:
         res_json = json.loads(response.text)
         return res_json["design_name"], res_json["tool_taxonomy"]
     except Exception:
-        for model_name in [m for m in st.session_state.active_models if m != PRIMARY_MODEL]:
+        fallback_models = st.session_state.get("active_models", FREE_ACTIVE_MODELS)
+        for model_name in [m for m in fallback_models if m != PRIMARY_MODEL]:
             try:
                 response = client.models.generate_content(
                     model=model_name,
@@ -1715,7 +1725,8 @@ def execute_manuscript_evaluation(
     except Exception as e:
         error_log.append(f"{PRIMARY_MODEL}: {str(e)[:120]}")
 
-    for model_name in [m for m in st.session_state.active_models if m != PRIMARY_MODEL]:
+    fallback_models = st.session_state.get("active_models", FREE_ACTIVE_MODELS)
+    for model_name in [m for m in fallback_models if m != PRIMARY_MODEL]:
         try:
             response = client.models.generate_content(
                 model=model_name,
@@ -1877,7 +1888,8 @@ def generate_long_version(
     except Exception:
         pass
 
-    for model_name in [m for m in st.session_state.active_models if m != PRIMARY_MODEL]:
+    fallback_models = st.session_state.get("active_models", FREE_ACTIVE_MODELS)
+    for model_name in [m for m in fallback_models if m != PRIMARY_MODEL]:
         try:
             response = client.models.generate_content(
                 model=model_name,
@@ -2490,7 +2502,8 @@ def answer_interrogation_query(
     except Exception:
         pass
     
-    for model_name in [m for m in st.session_state.active_models if m != PRIMARY_MODEL]:
+    fallback_models = st.session_state.get("active_models", FREE_ACTIVE_MODELS)
+    for model_name in [m for m in fallback_models if m != PRIMARY_MODEL]:
         try:
             response = client.models.generate_content(
                 model=model_name,
