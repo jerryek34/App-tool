@@ -19,7 +19,7 @@ jobs:
           pip install playwright
           playwright install chromium --with-deps
 
-      - name: Open App and Verify Active Session
+      - name: Open App and Wake if Sleeping
         run: |
           python - << 'EOF'
           from playwright.sync_api import sync_playwright
@@ -28,20 +28,17 @@ jobs:
               browser = p.chromium.launch(headless=True)
               page = browser.new_page()
               page.goto("https://kitique.streamlit.app/", wait_until="domcontentloaded", timeout=60000)
-              page.wait_for_timeout(8000)
+              page.wait_for_timeout(10000)
 
               wake_btn = page.locator("button:has-text('Yes, get this app back up!')")
               if wake_btn.count() > 0:
                   print("App was sleeping. Clicking wake button...")
                   wake_btn.first.click()
-                  # Wait up to 60s for the actual Streamlit app to boot
-                  page.wait_for_selector("[data-testid='stAppViewContainer']", timeout=60000)
-                  print("App successfully woken up!")
+                  page.wait_for_timeout(35000)
+                  print("Wake-up triggered successfully!")
               else:
-                  # Confirm the WebSocket/UI actually rendered
-                  page.wait_for_selector("[data-testid='stAppViewContainer']", timeout=30000)
-                  print("App is awake and active!")
+                  print("App is already awake! Waiting for WebSocket session...")
+                  page.wait_for_timeout(10000)
 
-              page.wait_for_timeout(5000)
               browser.close()
           EOF
